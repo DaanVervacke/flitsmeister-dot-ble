@@ -205,7 +205,7 @@ def serial_number_uuid(payload: bytes) -> str:
     The app hashes the raw serial bytes with MD5 into a version 3 UUID
     and uppercases it. An empty payload hashes like any other value.
     """
-    digest = hashlib.md5(payload).digest()  # noqa: S324
+    digest = hashlib.md5(payload, usedforsecurity=False).digest()
     return str(UUID(bytes=digest, version=3)).upper()
 
 
