@@ -1,0 +1,57 @@
+name: Gate
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        default: ""
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.14", "3.15"]
+        resolution: [highest, lowest-direct]
+
+    continue-on-error: ${{ matrix.python-version == '3.15' }}
+
+    env:
+      UV_RESOLUTION: ${{ matrix.resolution }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+          cache-suffix: ${{ matrix.python-version }}-${{ matrix.resolution }}
+
+      - name: Sync dependencies
+        run: |
+          if [ "${{ matrix.resolution }}" = "lowest-direct" ]; then
+            uv lock
+          fi
+          uv sync --locked --all-groups
+
+      - name: Run check gate
+        run: uv run python -m scripts.check
+
+      - name: Build docs
+        run: uv run --group docs sphinx-build -W -b html docs docs/_build
+
+      - name: Verify wheel
+        run: |
+          uv run python -c "import glob, sys, zipfile; w = glob.glob('dist/*.whl')[0]; names = zipfile.ZipFile(w).namelist(); sys.exit(0 if 'flitsmeister_dot_ble/py.typed' in names else 'py.typed missing from wheel: ' + w)"
+          uv venv /tmp/wheel-smoke
+          uv pip install --python /tmp/wheel-smoke/bin/python dist/*.whl
+          cd /tmp && /tmp/wheel-smoke/bin/python -c "from flitsmeister_dot_ble import FlitsmeisterDotClient, is_dot_advertisement"
