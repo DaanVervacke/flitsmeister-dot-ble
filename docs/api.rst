@@ -133,3 +133,10 @@ Exceptions
 .. autoclass:: flitsmeister_dot_ble.DotValidationError
    :members:
    :show-inheritance:
+
+Version
+-------
+
+``flitsmeister_dot_ble.__version__`` holds the installed package
+version as a string, or ``"0.0.0"`` when the package metadata is
+missing.

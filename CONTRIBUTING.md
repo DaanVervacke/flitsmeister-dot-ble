@@ -22,7 +22,7 @@ The scripts under `scripts/` talk to a real DOT. Run them as modules:
 
 | Script | Does |
 | --- | --- |
-| `scripts.probe_dot` | connects read-only and records the traffic as JSON lines |
+| `scripts.probe_dot` | connects read-only, logs the traffic and writes JSON lines with `--output` |
 | `scripts.drive_dot_client` | prints every update, `--controls` plays every preset and cycles the settings |
 | `scripts.live_validate` | runs every public function and asks you whether the DOT responded correctly |
 
