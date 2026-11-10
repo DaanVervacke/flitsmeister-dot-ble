@@ -22,7 +22,6 @@ from flitsmeister_dot_ble import (
     DotUpdate,
     FlitsmeisterDotClient,
     LedOrientation,
-    SpeechLanguage,
     Volume,
     __version__,
     animations,
@@ -124,9 +123,6 @@ async def tour(client: FlitsmeisterDotClient, pause_seconds: float) -> None:
     await client.set_led_orientation(LedOrientation.UPSIDE_DOWN)
     await asyncio.sleep(max(pause_seconds, 0.1))
     await client.set_led_orientation(LedOrientation.NORMAL)
-    await client.set_speech_language(SpeechLanguage.DUTCH)
-    await asyncio.sleep(max(pause_seconds, 0.1))
-    await client.set_speech_language(SpeechLanguage.ENGLISH)
 
 
 async def run(config: RunConfig, transport: BleTransport) -> None:

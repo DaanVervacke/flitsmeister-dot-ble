@@ -17,7 +17,7 @@ from functools import partial
 from types import TracebackType
 from typing import Final, Self, TypeAlias
 
-from bleak.exc import BleakError
+from bleak.exc import BleakError, BleakGATTProtocolError
 
 from .animations import DotAnimation, DotAnimationType
 from .const import (
@@ -45,6 +45,7 @@ from .exceptions import (
     DotError,
     DotNotReadyError,
     DotProtocolError,
+    DotRejectedError,
     DotTimeoutError,
     DotValidationError,
 )
@@ -57,7 +58,6 @@ from .models import (
     DotState,
     DotUpdate,
     LedOrientation,
-    SpeechLanguage,
     Volume,
 )
 from .protocol import (
@@ -67,6 +67,7 @@ from .protocol import (
     decode_charging_state,
     decode_led_orientation,
     decode_motion_status,
+    decode_speech,
     decode_text,
     serial_number_uuid,
 )
@@ -188,6 +189,11 @@ def _decode_software(state: DotState, payload: bytes) -> tuple[DotState, None]:
     return replace(state, software_revision=decode_text(payload)), None
 
 
+def _decode_speech(state: DotState, payload: bytes) -> tuple[DotState, None]:
+    language, voice = decode_speech(payload)
+    return replace(state, speech_language=language, speech_voice_raw=voice), None
+
+
 _DECODERS: Final[dict[str, _Decoder]] = {
     BATTERY_LEVEL_CHARACTERISTIC_UUID: _decode_battery,
     BATTERY_CHARGING_CHARACTERISTIC_UUID: _decode_charging,
@@ -200,6 +206,7 @@ _DECODERS: Final[dict[str, _Decoder]] = {
     SERIAL_NUMBER_CHARACTERISTIC_UUID: _decode_serial,
     FIRMWARE_REVISION_CHARACTERISTIC_UUID: _decode_firmware,
     SOFTWARE_REVISION_CHARACTERISTIC_UUID: _decode_software,
+    SPEECH_LANGUAGE_CHARACTERISTIC_UUID: _decode_speech,
 }
 
 
@@ -293,7 +300,9 @@ class FlitsmeisterDotClient:
 
         Connects the transport, subscribes to the button, battery,
         charging and motion characteristics, reads the device information
-        and returns once every read succeeded. Does nothing when already
+        and the speech language and returns once every read finished. A
+        read the DOT refuses with a GATT error leaves its value None.
+        Does nothing when already
         connected. Waits for the cleanup of a failed session first. The
         client can connect again after ``disconnect()`` or after a lost
         session.
@@ -367,6 +376,8 @@ class FlitsmeisterDotClient:
 
         Raises:
             DotNotReadyError: The session is not ready.
+            DotRejectedError: The DOT refused the write. The session stays
+                ready.
             DotConnectionError: The session failed earlier or the write
                 failed. Transport errors are chained as ``__cause__``.
             DotValidationError: The animation does not fit the packet.
@@ -387,6 +398,8 @@ class FlitsmeisterDotClient:
 
         Raises:
             DotNotReadyError: The session is not ready.
+            DotRejectedError: The DOT refused the write. The session stays
+                ready.
             DotConnectionError: The session failed earlier or the write
                 failed.
         """
@@ -398,6 +411,8 @@ class FlitsmeisterDotClient:
 
         Raises:
             DotNotReadyError: The session is not ready.
+            DotRejectedError: The DOT refused the write. The session stays
+                ready.
             DotConnectionError: The session failed earlier or the write
                 or the read back failed.
             DotProtocolError: The read back returned a malformed value.
@@ -412,6 +427,8 @@ class FlitsmeisterDotClient:
 
         Raises:
             DotNotReadyError: The session is not ready.
+            DotRejectedError: The DOT refused the write. The session stays
+                ready.
             DotConnectionError: The session failed earlier or the write
                 or the read back failed.
             DotProtocolError: The read back returned a malformed value.
@@ -420,22 +437,6 @@ class FlitsmeisterDotClient:
             LED_ROTATION_CHARACTERISTIC_UUID, bytes((orientation,)), "orientation"
         )
         await self._read_and_apply(LED_ROTATION_CHARACTERISTIC_UUID)
-
-    async def set_speech_language(self, language: SpeechLanguage) -> None:
-        """Set the voice language.
-
-        The Flitsmeister app never reads the language back, so the
-        state mirrors the written value.
-
-        Raises:
-            DotNotReadyError: The session is not ready.
-            DotConnectionError: The session failed earlier or the write
-                failed.
-        """
-        await self._send(
-            SPEECH_LANGUAGE_CHARACTERISTIC_UUID, bytes((language,)), "language"
-        )
-        self._state = replace(self._state, speech_language=language)
 
     async def read_settings(self) -> None:
         """Read brightness and LED orientation into the state.
@@ -482,7 +483,11 @@ class FlitsmeisterDotClient:
                     )
             for characteristic in READ_CHARACTERISTICS:
                 async with asyncio.timeout(self._response_timeout):
-                    payload = await self.transport.read_gatt_char(characteristic)
+                    try:
+                        payload = await self.transport.read_gatt_char(characteristic)
+                    except BleakGATTProtocolError:
+                        _LOGGER.debug("The DOT refused the read of %s", characteristic)
+                        continue
                     await self._apply(characteristic, payload)
             self._phase = _Phase.READY
         except DotError:
@@ -635,6 +640,8 @@ class FlitsmeisterDotClient:
         self._require_ready()
         try:
             await self._write(characteristic, data)
+        except BleakGATTProtocolError as err:
+            raise DotRejectedError(f"The DOT refused the {label} write") from err
         except _TRANSPORT_ERRORS as err:
             failure = DotConnectionError(f"Writing {label} to the DOT failed")
             self._fail(failure)

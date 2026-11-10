@@ -3,6 +3,7 @@
 import asyncio
 from typing import Any
 
+from bleak.exc import BleakGATTProtocolError, BleakGATTProtocolErrorCode
 from flitsmeister_dot_ble import (
     ConnectionLostCallback,
     DisconnectedCallback,
@@ -21,6 +22,7 @@ from flitsmeister_dot_ble.const import (
     MOTION_CHARACTERISTIC_UUID,
     SERIAL_NUMBER_CHARACTERISTIC_UUID,
     SOFTWARE_REVISION_CHARACTERISTIC_UUID,
+    SPEECH_LANGUAGE_CHARACTERISTIC_UUID,
 )
 from flitsmeister_dot_ble.transport_types import BleTransport
 
@@ -37,6 +39,7 @@ DEFAULT_READS: dict[str, bytes] = {
     SERIAL_NUMBER_CHARACTERISTIC_UUID: b"\x11\x22\x33",
     FIRMWARE_REVISION_CHARACTERISTIC_UUID: b"1.0.14",
     SOFTWARE_REVISION_CHARACTERISTIC_UUID: b"1.0.14",
+    SPEECH_LANGUAGE_CHARACTERISTIC_UUID: b"\x01\x01",
 }
 
 
@@ -66,6 +69,8 @@ class FakeTransport:
         self.fail_read: BaseException | None = None
         self.fail_stop_notify: BaseException | None = None
         self.hang_reads: set[str] = set()
+        self.refuse_reads: set[str] = set()
+        self.refuse_writes: set[str] = set()
 
     async def connect(self, disconnected_callback: DisconnectedCallback) -> None:
         self.connect_calls += 1
@@ -97,6 +102,8 @@ class FakeTransport:
             await asyncio.Event().wait()
         if self.fail_read is not None:
             raise self.fail_read
+        if characteristic in self.refuse_reads:
+            raise BleakGATTProtocolError(BleakGATTProtocolErrorCode.READ_NOT_PERMITTED)
         self.read_characteristics.append(characteristic)
         return self.reads[characteristic]
 
@@ -105,6 +112,8 @@ class FakeTransport:
     ) -> None:
         if self.fail_writes:
             raise OSError("write failed")
+        if characteristic in self.refuse_writes:
+            raise BleakGATTProtocolError(BleakGATTProtocolErrorCode.WRITE_NOT_PERMITTED)
         self.writes.append(data)
         self.write_characteristics.append(characteristic)
         self.responses.append(response)

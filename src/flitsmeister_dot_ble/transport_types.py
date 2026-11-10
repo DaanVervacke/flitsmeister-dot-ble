@@ -42,9 +42,20 @@ class BleTransport(Protocol):
         """Stop the notifications on ``characteristic``."""
 
     async def read_gatt_char(self, characteristic: str) -> bytes:
-        """Read ``characteristic`` and return its value."""
+        """Read ``characteristic`` and return its value.
+
+        Raise ``bleak.exc.BleakGATTProtocolError`` when the device refuses
+        the read. The client then leaves that value unset. Any other error
+        fails the session.
+        """
 
     async def write_gatt_char(
         self, characteristic: str, data: bytes, response: bool = False
     ) -> None:
-        """Write ``data`` to ``characteristic``, with or without response."""
+        """Write ``data`` to ``characteristic``, with or without response.
+
+        Raise ``bleak.exc.BleakGATTProtocolError`` or ``DotRejectedError``
+        when the device refuses the write. The client raises
+        ``DotRejectedError`` and keeps the session. Any other error fails
+        the session.
+        """

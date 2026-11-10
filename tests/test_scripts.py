@@ -11,7 +11,6 @@ from flitsmeister_dot_ble import (
     DotState,
     FlitsmeisterDotClient,
     LedOrientation,
-    SpeechLanguage,
     Volume,
     animations,
     is_dot_advertisement,
@@ -20,6 +19,7 @@ from flitsmeister_dot_ble.const import (
     BATTERY_LEVEL_CHARACTERISTIC_UUID,
     BRIGHTNESS_CHARACTERISTIC_UUID,
     LED_ROTATION_CHARACTERISTIC_UUID,
+    READ_CHARACTERISTICS,
     SERIAL_NUMBER_CHARACTERISTIC_UUID,
 )
 from scripts import _dot_common as common
@@ -108,7 +108,7 @@ async def test_capture_transport_records_both_directions(tmp_path: Path) -> None
             await asyncio.sleep(0.05)
     records = [json.loads(line) for line in path.read_text().splitlines()]
     directions = [record["dir"] for record in records]
-    assert directions.count("read") == 8
+    assert directions.count("read") == len(READ_CHARACTERISTICS)
     assert "rx" in directions
     assert inner.stopped_characteristics
     assert inner.disconnect_calls == 1
@@ -274,7 +274,7 @@ async def test_probe_capture_records_traffic(
     assert transport.connect_calls == 1
     assert transport.disconnect_calls == 1
     records = [json.loads(line) for line in output.read_text().splitlines()]
-    assert len(records) == 8
+    assert len(records) == len(READ_CHARACTERISTICS)
     assert {record["dir"] for record in records} == {"read"}
     serial_records = [
         record
@@ -385,7 +385,7 @@ async def test_drive_read_only(
     await drive_dot_client.run(_run_config(), transport)
     assert transport.writes == []
     lines = capsys.readouterr().out.splitlines()
-    assert len(lines) == 8
+    assert len(lines) == len(READ_CHARACTERISTICS)
     first = json.loads(lines[0])
     assert first["characteristic"] == BATTERY_LEVEL_CHARACTERISTIC_UUID
     assert first["state"]["battery_level"] == 100
@@ -415,7 +415,6 @@ async def test_drive_controls() -> None:
     assert bytes((Volume.HARD,)) in writes
     assert bytes((Brightness.BRIGHTNESS_10,)) in writes
     assert bytes((LedOrientation.UPSIDE_DOWN,)) in writes
-    assert bytes((SpeechLanguage.DUTCH,)) in writes
     assert transport.read_characteristics.count(BRIGHTNESS_CHARACTERISTIC_UUID) == 2
     assert transport.read_characteristics.count(LED_ROTATION_CHARACTERISTIC_UUID) == 2
 

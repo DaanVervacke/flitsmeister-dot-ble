@@ -21,16 +21,21 @@ from flitsmeister_dot_ble import (
     Volume,
     animations,
 )
-from flitsmeister_dot_ble.const import BUTTON_EVENTS_CHARACTERISTIC_UUID
+from flitsmeister_dot_ble.const import (
+    BUTTON_EVENTS_CHARACTERISTIC_UUID,
+    SPEECH_LANGUAGE_CHARACTERISTIC_UUID,
+)
 from flitsmeister_dot_ble.protocol import (
     decode_brightness,
     decode_button_event,
     decode_led_orientation,
+    decode_speech,
 )
 
 from .helpers import FakeTransport
 
 FIXTURES = Path(__file__).parent / "fixtures"
+LIVE_SPEECH_READ = bytes.fromhex("0101")
 
 
 def load_records(name: str) -> list[dict[str, object]]:
@@ -52,6 +57,7 @@ async def test_dot_connect_read_capture_replays_through_the_client() -> None:
         for record in records
         if record["dir"] == "read"
     }
+    reads.setdefault(SPEECH_LANGUAGE_CHARACTERISTIC_UUID, LIVE_SPEECH_READ)
     transport = FakeTransport(reads=reads)
 
     async with FlitsmeisterDotClient(transport) as client:
@@ -64,6 +70,7 @@ async def test_dot_connect_read_capture_replays_through_the_client() -> None:
         assert client.state.serial_uuid is not None
         assert client.state.firmware_revision == "2.9.0"
         assert client.state.software_revision == "2.9.0"
+        assert client.state.speech_language is SpeechLanguage.DUTCH
 
 
 def test_brightness_maps_unknown_values_to_full() -> None:
@@ -77,6 +84,15 @@ def test_brightness_rejects_wrong_length() -> None:
 
 def test_led_orientation_maps_unknown_values_to_upside_down() -> None:
     assert decode_led_orientation(b"\x05") is LedOrientation.UPSIDE_DOWN
+
+
+def test_speech_read_from_a_live_dot_decodes() -> None:
+    assert decode_speech(LIVE_SPEECH_READ) == (SpeechLanguage.DUTCH, 1)
+
+
+def test_speech_rejects_an_empty_payload() -> None:
+    with pytest.raises(DotProtocolError, match="empty"):
+        decode_speech(b"")
 
 
 def test_led_orientation_rejects_wrong_length() -> None:
@@ -133,7 +149,6 @@ def test_drive_tour_writes_match_the_presets() -> None:
     assert bytes((Volume.NORMAL,)) in writes
     assert bytes((Brightness.BRIGHTNESS_10,)) in writes
     assert bytes((LedOrientation.UPSIDE_DOWN,)) in writes
-    assert bytes((SpeechLanguage.DUTCH,)) in writes
 
 
 def test_dot_button_events_from_capture_decode() -> None:

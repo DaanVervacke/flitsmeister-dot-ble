@@ -122,6 +122,10 @@ Exceptions
    :members:
    :show-inheritance:
 
+.. autoclass:: flitsmeister_dot_ble.DotRejectedError
+   :members:
+   :show-inheritance:
+
 .. autoclass:: flitsmeister_dot_ble.DotTimeoutError
    :members:
    :show-inheritance:

@@ -18,6 +18,7 @@ from .exceptions import (
     DotError,
     DotNotReadyError,
     DotProtocolError,
+    DotRejectedError,
     DotTimeoutError,
     DotValidationError,
 )
@@ -65,6 +66,7 @@ __all__ = [
     "DotError",
     "DotNotReadyError",
     "DotProtocolError",
+    "DotRejectedError",
     "DotSound",
     "DotState",
     "DotTimeoutError",

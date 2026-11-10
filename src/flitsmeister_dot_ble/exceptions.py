@@ -9,6 +9,7 @@ __all__ = [
     "DotError",
     "DotNotReadyError",
     "DotProtocolError",
+    "DotRejectedError",
     "DotTimeoutError",
     "DotValidationError",
 ]
@@ -35,6 +36,14 @@ class DotTimeoutError(DotError, TimeoutError):
 
 class DotProtocolError(DotError):
     """A payload is malformed or holds an unknown value."""
+
+
+class DotRejectedError(DotError):
+    """The DOT refused a write with a GATT error.
+
+    The link stays up and the session stays ``READY``. The GATT error is
+    chained as ``__cause__``.
+    """
 
 
 class DotValidationError(DotError, ValueError):

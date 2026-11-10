@@ -18,6 +18,7 @@ from .models import (
     DotButtonEvent,
     LedOrientation,
     MotionStatus,
+    SpeechLanguage,
 )
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "decode_charging_state",
     "decode_led_orientation",
     "decode_motion_status",
+    "decode_speech",
     "decode_text",
     "is_dot_advertisement",
     "serial_number_uuid",
@@ -131,6 +133,26 @@ def decode_led_orientation(payload: bytes) -> LedOrientation:
         return LedOrientation(payload[0])
     except ValueError:
         return LedOrientation.UPSIDE_DOWN
+
+
+def decode_speech(payload: bytes) -> tuple[SpeechLanguage | None, int | None]:
+    """Decode the speech language characteristic into language and voice.
+
+    Byte 0 is the language, None when this library does not know the
+    value. Byte 1, when present, is returned as is. A DOT on firmware
+    2.9.0 with the Dutch voice reads ``01 01``.
+
+    Raises:
+        DotProtocolError: The payload is empty.
+    """
+    if not payload:
+        raise DotProtocolError("Speech language payload is empty")
+    try:
+        language: SpeechLanguage | None = SpeechLanguage(payload[0])
+    except ValueError:
+        language = None
+    voice = payload[1] if len(payload) > 1 else None
+    return language, voice
 
 
 def decode_button_event(payload: bytes) -> DotButtonEvent:

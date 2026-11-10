@@ -114,10 +114,11 @@ class LedOrientation(IntEnum):
 
 
 class SpeechLanguage(IntEnum):
-    """Voice language written to the speech language characteristic.
+    """Voice language read from byte 0 of the speech language characteristic.
 
-    The Flitsmeister app maps Flemish to Dutch and every language it
-    does not ship a voice for to English.
+    The voice is part of the firmware image. The Flitsmeister app changes
+    it by flashing an image built for another language and voice. The
+    characteristic itself is read only.
     """
 
     ENGLISH = 0
@@ -144,10 +145,13 @@ class DotState:
     Every field is None until the device reported it. ``serial_raw``
     holds the hex bytes of the serial number read, ``serial_uuid`` the
     uppercase UUID string the Flitsmeister app derives from them.
-    Volume and speech language mirror the last written value, the
-    Flitsmeister app never reads them back. Brightness and LED
-    orientation reflect the value read back from the device after a
-    write or after ``read_settings``.
+    Volume mirrors the last written value, the Flitsmeister app never
+    reads it back. Brightness and LED orientation reflect the value read
+    back from the device after a write or after ``read_settings``.
+    ``speech_language`` and ``speech_voice_raw`` are read while
+    connecting. ``speech_language`` stays None for a language byte this
+    library does not know. ``speech_voice_raw`` holds byte 1 as is. Its
+    meaning is unconfirmed.
     """
 
     battery_level: int | None = None
@@ -163,6 +167,7 @@ class DotState:
     brightness: Brightness | None = None
     led_orientation: LedOrientation | None = None
     speech_language: SpeechLanguage | None = None
+    speech_voice_raw: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

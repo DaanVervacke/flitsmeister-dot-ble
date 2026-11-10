@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 import pytest
+from bleak.exc import BleakGATTProtocolError
 from flitsmeister_dot_ble import (
     ButtonAction,
     ChargingState,
@@ -12,6 +13,7 @@ from flitsmeister_dot_ble import (
     DotConnectionError,
     DotNotReadyError,
     DotProtocolError,
+    DotRejectedError,
     DotState,
     DotTimeoutError,
     DotUpdate,
@@ -530,17 +532,65 @@ async def test_set_led_orientation_writes_and_reads_back(
     assert transport.read_characteristics.count(LED_ROTATION_CHARACTERISTIC_UUID) == 1
 
 
-async def test_set_speech_language_writes_and_mirrors(
+async def test_connect_reads_the_speech_language_and_voice(
     transport: FakeTransport,
 ) -> None:
-    client = make_client(transport)
-    async with client:
-        await client.set_speech_language(SpeechLanguage.GERMAN)
+    async with make_client(transport) as client:
+        assert client.state.speech_language is SpeechLanguage.DUTCH
+        assert client.state.speech_voice_raw == 1
 
-        assert client.state.speech_language is SpeechLanguage.GERMAN
+    assert SPEECH_LANGUAGE_CHARACTERISTIC_UUID in transport.read_characteristics
 
-    assert transport.writes == [b"\x02"]
-    assert transport.write_characteristics == [SPEECH_LANGUAGE_CHARACTERISTIC_UUID]
+
+async def test_unknown_speech_language_stays_none(transport: FakeTransport) -> None:
+    transport.reads[SPEECH_LANGUAGE_CHARACTERISTIC_UUID] = b"\x09"
+    async with make_client(transport) as client:
+        assert client.state.speech_language is None
+        assert client.state.speech_voice_raw is None
+
+
+async def test_refused_read_leaves_the_value_unset(transport: FakeTransport) -> None:
+    transport.refuse_reads.add(SPEECH_LANGUAGE_CHARACTERISTIC_UUID)
+    async with make_client(transport) as client:
+        assert client.ready
+        assert client.state.speech_language is None
+        assert client.state.manufacturer_name == "Flitsmeister"
+
+
+class RefusingTransport(FakeTransport):
+    """Transport that refuses every write with ``DotRejectedError``."""
+
+    async def write_gatt_char(
+        self, characteristic: str, data: bytes, response: bool = False
+    ) -> None:
+        await asyncio.sleep(0)
+        raise DotRejectedError(f"refused {characteristic}, response {response}")
+
+
+async def test_transport_can_refuse_with_dot_rejected_error() -> None:
+    async with make_client(RefusingTransport()) as client:
+        with pytest.raises(DotRejectedError, match="response True"):
+            await client.set_volume(Volume.LOW)
+
+        assert client.ready
+
+
+async def test_refused_write_raises_and_keeps_the_session(
+    transport: FakeTransport,
+) -> None:
+    lost: list[Exception] = []
+    transport.refuse_writes.add(VOLUME_CHARACTERISTIC_UUID)
+    async with make_client(transport, connection_lost_callback=lost.append) as client:
+        with pytest.raises(DotRejectedError, match="refused the volume write") as info:
+            await client.set_volume(Volume.LOW)
+
+        assert isinstance(info.value.__cause__, BleakGATTProtocolError)
+        assert client.ready
+        assert client.state.volume is None
+        await client.play_animation(animations.startup())
+
+    assert lost == []
+    assert transport.writes == [animations.startup().to_bytes()]
 
 
 async def test_read_settings_fills_the_state(transport: FakeTransport) -> None:
