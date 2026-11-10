@@ -1,9 +1,15 @@
 import asyncio
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from flitsmeister_dot_ble import DotSound, FlitsmeisterDotClient
+from flitsmeister_dot_ble import (
+    DotAnimation,
+    DotSound,
+    FlitsmeisterDotClient,
+    animations,
+)
 from flitsmeister_dot_ble.const import (
     BATTERY_CHARGING_CHARACTERISTIC_UUID,
     BRIGHTNESS_CHARACTERISTIC_UUID,
@@ -472,3 +478,38 @@ def test_main_reports_a_crash(
     monkeypatch.setattr(live_validate, "connect_and_validate", failing)
     assert live_validate.main(["--config", str(path)]) == 1
     assert "no adapter" in caplog.text
+
+
+DESCRIBED_PRESETS: list[Callable[..., DotAnimation]] = [
+    animations.startup,
+    animations.fade_out_without_cut_off,
+    animations.lane_closure,
+    *(documented for _name, _builder, documented in live_validate.RATEABLE_PRESETS),
+    *(preset for _name, preset in live_validate.PLAIN_PRESETS),
+]
+
+
+@pytest.mark.parametrize(
+    "preset", DESCRIBED_PRESETS, ids=lambda preset: preset.__name__
+)
+def test_every_prompted_preset_describes_what_the_dot_does(
+    preset: Callable[..., DotAnimation],
+) -> None:
+    description = live_validate._describe(preset)
+    assert description.startswith(("The ", "All ")), description
+    assert description.endswith("."), description
+
+
+@pytest.mark.parametrize(
+    ("answer", "outcome"),
+    [
+        ("y", Outcome.PASS),
+        (" YES ", Outcome.PASS),
+        ("n", Outcome.FAIL),
+        ("retry", Outcome.RETRY),
+        ("s", Outcome.SKIP),
+        ("maybe", None),
+    ],
+)
+def test_parse_answer(answer: str, outcome: Outcome | None) -> None:
+    assert live_validate.parse_answer(answer) is outcome

@@ -59,16 +59,6 @@ from scripts.drive_dot_client import DEFAULT_CONFIG
 
 _LOGGER = logging.getLogger(__name__)
 
-SECTIONS = (
-    "info",
-    "settings",
-    "animations",
-    "sounds",
-    "buttons",
-    "sensors",
-    "reconnect",
-    "errors",
-)
 DEFAULT_OUTPUT = Path("tests/fixtures/dot_live_validation.jsonl")
 DEFAULT_REPORT = Path("reports/live_validation_report.json")
 PROGRESS_FRACTIONS = (0.0, 0.25, 0.5, 0.75, 1.0)
@@ -76,6 +66,11 @@ PROGRESS_LEDS = "1, 2, 4, 6 and 8"
 CUSTOM_COLOR = 0xFF00FF00
 ORIENTATION_PROBE = animations.progress(color=DotColor.SUCCESS, fraction=0.25)
 RESTORE_VOLUME = Volume.NORMAL
+SOUND_CHECK_VOLUME = Volume.NORMAL
+SOUND_CHECK_LEDS = 2
+UUID_STRING_LENGTH = 36
+LONG_HOLD_SECONDS = 3
+LOST_CALLBACK_GRACE_SECONDS = 1.0
 RECONNECT_RETRY_SECONDS = 2.0
 BRIDGE_POLL_SECONDS = 0.2
 VOLUME_HINTS = {
@@ -140,6 +135,23 @@ class Console(Protocol):
     async def pause(self, message: str) -> None: ...
 
 
+ANSWERS = {
+    "y": Outcome.PASS,
+    "yes": Outcome.PASS,
+    "n": Outcome.FAIL,
+    "no": Outcome.FAIL,
+    "r": Outcome.RETRY,
+    "retry": Outcome.RETRY,
+    "s": Outcome.SKIP,
+    "skip": Outcome.SKIP,
+}
+
+
+def parse_answer(answer: str) -> Outcome | None:
+    """Return the outcome a typed answer stands for, or None when unknown."""
+    return ANSWERS.get(answer.strip().lower())
+
+
 class TerminalConsole:
     """Console on stdin and stdout."""
 
@@ -154,18 +166,13 @@ class TerminalConsole:
     async def ask(self, question: str) -> tuple[Outcome, str]:
         while True:
             answer = await asyncio.to_thread(input, f"\n??? {question} [y/n/r/s] ")
-            match answer.strip().lower():
-                case "y" | "yes":
-                    return Outcome.PASS, ""
-                case "r" | "retry":
-                    return Outcome.RETRY, ""
-                case "s" | "skip":
-                    return Outcome.SKIP, ""
-                case "n" | "no":
-                    note = await asyncio.to_thread(input, "    What happened instead? ")
-                    return Outcome.FAIL, note.strip()
-                case _:
-                    continue
+            outcome = parse_answer(answer)
+            if outcome is None:
+                continue
+            if outcome is not Outcome.FAIL:
+                return outcome, ""
+            note = await asyncio.to_thread(input, "    What happened instead? ")
+            return outcome, note.strip()
 
     async def pause(self, message: str) -> None:
         await asyncio.to_thread(input, f"\n>>> {message} Press Enter when done. ")
@@ -222,17 +229,10 @@ class FileConsole:
     async def ask(self, question: str) -> tuple[Outcome, str]:
         while True:
             answer, note = await self._answer("ask", question)
-            match answer.strip().lower():
-                case "y" | "yes":
-                    return Outcome.PASS, ""
-                case "r" | "retry":
-                    return Outcome.RETRY, ""
-                case "s" | "skip":
-                    return Outcome.SKIP, ""
-                case "n" | "no":
-                    return Outcome.FAIL, note.strip()
-                case _:
-                    continue
+            outcome = parse_answer(answer)
+            if outcome is None:
+                continue
+            return outcome, note.strip() if outcome is Outcome.FAIL else ""
 
     async def pause(self, message: str) -> None:
         await self._answer("pause", message)
@@ -456,22 +456,23 @@ async def check_info(v: Validator) -> None:
     state = client.state
     level = state.battery_level
     v.expect("battery level read", level is not None and 0 <= level <= 100, str(level))
-    for name in (
-        "charging_state",
-        "motion_status",
-        "manufacturer_name",
-        "model_number",
-        "serial_raw",
-        "serial_uuid",
-        "firmware_revision",
-        "software_revision",
-        "speech_language",
+    for name, value in (
+        ("charging_state", state.charging_state),
+        ("motion_status", state.motion_status),
+        ("manufacturer_name", state.manufacturer_name),
+        ("model_number", state.model_number),
+        ("serial_raw", state.serial_raw),
+        ("serial_uuid", state.serial_uuid),
+        ("firmware_revision", state.firmware_revision),
+        ("software_revision", state.software_revision),
+        ("speech_language", state.speech_language),
     ):
-        found = getattr(state, name) is not None
+        found = value is not None
         v.expect(f"{name} read", found, "" if found else "missing")
     uuid = state.serial_uuid or ""
     v.expect(
-        "serial uuid is an uppercase UUID", len(uuid) == 36 and uuid == uuid.upper()
+        "serial uuid is an uppercase UUID",
+        len(uuid) == UUID_STRING_LENGTH and uuid == uuid.upper(),
     )
     seen = {update.characteristic for update in v.monitor.updates}
     v.expect(
@@ -530,7 +531,9 @@ async def check_settings(v: Validator) -> None:
             f"Volume {volume.name}: was the confirm beep {VOLUME_HINTS[volume]}?",
         )
         v.expect(f"state volume is {volume.name}", client.state.volume is volume)
-    await v.attempt("set_volume NORMAL", partial(client.set_volume, Volume.NORMAL))
+    await v.attempt(
+        f"set_volume {RESTORE_VOLUME.name}", partial(client.set_volume, RESTORE_VOLUME)
+    )
     for brightness in Brightness:
 
         async def set_brightness(brightness: Brightness = brightness) -> None:
@@ -575,23 +578,68 @@ async def check_settings(v: Validator) -> None:
     )
 
 
-def _animation_checks(
-    client: FlitsmeisterDotClient, pause: float
-) -> list[tuple[str, Callable[[], Awaitable[None]], str]]:
-    checks: list[tuple[str, Callable[[], Awaitable[None]], str]] = []
+AnimationCheck = tuple[str, Callable[[], Awaitable[None]], str]
+RATEABLE_PRESETS: tuple[
+    tuple[str, Callable[..., DotAnimation], Callable[..., DotAnimation]], ...
+] = (
+    ("speed_trap", animations.speed_trap, animations.speed_trap),
+    ("speed_cam", animations.speed_cam, animations.speed_cam),
+    ("traffic_camera", animations.traffic_camera, animations.traffic_camera),
+    (
+        "avg_speed_check_start",
+        animations.avg_speed_check_start,
+        animations.avg_speed_check_start,
+    ),
+    ("police_hotspot", animations.police_hotspot, animations.police_hotspot),
+    ("roadworks", animations.roadworks, animations.roadworks),
+    (
+        "incident ACCIDENT",
+        partial(animations.incident, speech=DotSound.SPEECH_ACCIDENT),
+        animations.incident,
+    ),
+)
+PLAIN_PRESETS: tuple[tuple[str, Callable[[], DotAnimation]], ...] = (
+    ("avg_speed_check_end", animations.avg_speed_check_end),
+    ("traffic_jam_start", animations.traffic_jam_start),
+    ("traffic_jam_end", animations.traffic_jam_end),
+    ("ambulance", animations.ambulance),
+    ("fire_truck", animations.fire_truck),
+    ("police", animations.police),
+    ("emergency_vehicle", animations.emergency_vehicle),
+    ("railway_crossing", animations.railway_crossing),
+    ("wrong_way_driving", animations.wrong_way_driving),
+    ("wrong_way_driver", animations.wrong_way_driver),
+    ("reporting", animations.reporting),
+    ("brightness_sample", animations.brightness_sample),
+    ("orientation_sample", animations.orientation_sample),
+    ("updating", animations.updating),
+)
+LANE_CLOSURE_SPEECH = (
+    DotSound.SPEECH_LEFT_LANE_CLOSED,
+    DotSound.SPEECH_LANE_CLOSED,
+    DotSound.SPEECH_RIGHT_LANE_CLOSED,
+)
 
-    def single(name: str, animation: DotAnimation, question: str) -> None:
-        checks.append((name, partial(client.play_animation, animation), question))
 
-    single("startup", animations.startup(), f"{_describe(animations.startup)} Right?")
-    checks.append(
+def _single(
+    client: FlitsmeisterDotClient, name: str, animation: DotAnimation, question: str
+) -> AnimationCheck:
+    return name, partial(client.play_animation, animation), question
+
+
+def _fade_checks(client: FlitsmeisterDotClient, pause: float) -> list[AnimationCheck]:
+    return [
+        _single(
+            client,
+            "startup",
+            animations.startup(),
+            f"{_describe(animations.startup)} Right?",
+        ),
         (
             "fade_out",
             _sequence(client, (animations.updating(), animations.fade_out()), pause),
             "A white wave started, then the LEDs went dark. Right?",
-        )
-    )
-    checks.append(
+        ),
         (
             "fade_out_without_cut_off",
             _sequence(
@@ -603,72 +651,59 @@ def _animation_checks(
                 "A white wave started. "
                 f"{_describe(animations.fade_out_without_cut_off)} Did that happen?"
             ),
-        )
-    )
-    rateable: tuple[
-        tuple[str, Callable[..., DotAnimation], Callable[..., DotAnimation]], ...
-    ] = (
-        ("speed_trap", animations.speed_trap, animations.speed_trap),
-        ("speed_cam", animations.speed_cam, animations.speed_cam),
-        ("traffic_camera", animations.traffic_camera, animations.traffic_camera),
-        (
-            "avg_speed_check_start",
-            animations.avg_speed_check_start,
-            animations.avg_speed_check_start,
         ),
-        ("police_hotspot", animations.police_hotspot, animations.police_hotspot),
-        ("roadworks", animations.roadworks, animations.roadworks),
-        (
-            "incident ACCIDENT",
-            partial(animations.incident, speech=DotSound.SPEECH_ACCIDENT),
-            animations.incident,
-        ),
-    )
-    for name, builder, documented in rateable:
+    ]
+
+
+def _rateable_checks(client: FlitsmeisterDotClient) -> list[AnimationCheck]:
+    checks: list[AnimationCheck] = []
+    for name, builder, documented in RATEABLE_PRESETS:
         description = _describe(documented)
-        single(
-            f"{name} rateable",
-            builder(rateable=True),
-            f"{description} Then press a button. Did it wait for your press and"
-            " end on it?",
+        checks.append(
+            _single(
+                client,
+                f"{name} rateable",
+                builder(rateable=True),
+                f"{description} Then press a button. Did it wait for your press"
+                " and end on it?",
+            )
         )
-        single(
-            f"{name} not rateable",
-            builder(rateable=False),
-            f"{description} Did it end by itself without a button press?",
+        checks.append(
+            _single(
+                client,
+                f"{name} not rateable",
+                builder(rateable=False),
+                f"{description} Did it end by itself without a button press?",
+            )
         )
-    plain: tuple[tuple[str, Callable[[], DotAnimation]], ...] = (
-        ("avg_speed_check_end", animations.avg_speed_check_end),
-        ("traffic_jam_start", animations.traffic_jam_start),
-        ("traffic_jam_end", animations.traffic_jam_end),
-        ("ambulance", animations.ambulance),
-        ("fire_truck", animations.fire_truck),
-        ("police", animations.police),
-        ("emergency_vehicle", animations.emergency_vehicle),
-        ("railway_crossing", animations.railway_crossing),
-        ("wrong_way_driving", animations.wrong_way_driving),
-        ("wrong_way_driver", animations.wrong_way_driver),
-        ("reporting", animations.reporting),
-        ("brightness_sample", animations.brightness_sample),
-        ("orientation_sample", animations.orientation_sample),
-        ("updating", animations.updating),
-    )
-    for name, preset in plain:
-        single(name, preset(), f"{_describe(preset)} Did that happen?")
-    for speech in (
-        DotSound.SPEECH_LEFT_LANE_CLOSED,
-        DotSound.SPEECH_LANE_CLOSED,
-        DotSound.SPEECH_RIGHT_LANE_CLOSED,
-    ):
+    return checks
+
+
+def _plain_checks(client: FlitsmeisterDotClient) -> list[AnimationCheck]:
+    checks = [
+        _single(client, name, preset(), f"{_describe(preset)} Did that happen?")
+        for name, preset in PLAIN_PRESETS
+    ]
+    for speech in LANE_CLOSURE_SPEECH:
         words = speech.name.removeprefix("SPEECH_").lower().replace("_", " ")
-        single(
-            f"lane_closure {speech.name}",
-            animations.lane_closure(speech=speech),
-            f"{_describe(animations.lane_closure)} The speech says '{words}'."
-            " Did that happen?",
+        checks.append(
+            _single(
+                client,
+                f"lane_closure {speech.name}",
+                animations.lane_closure(speech=speech),
+                f"{_describe(animations.lane_closure)} The speech says '{words}'."
+                " Did that happen?",
+            )
         )
+    return checks
+
+
+def _progress_checks(
+    client: FlitsmeisterDotClient, pause: float
+) -> list[AnimationCheck]:
     colors: list[tuple[str, int]] = [(color.name, color) for color in DotColor]
     colors.append((f"custom green {CUSTOM_COLOR:#010x}", CUSTOM_COLOR))
+    checks: list[AnimationCheck] = []
     for label, color in colors:
         steps = [
             animations.progress(color=color, fraction=fraction)
@@ -698,6 +733,17 @@ def _animation_checks(
     return checks
 
 
+def _animation_checks(
+    client: FlitsmeisterDotClient, pause: float
+) -> list[AnimationCheck]:
+    return [
+        *_fade_checks(client, pause),
+        *_rateable_checks(client),
+        *_plain_checks(client),
+        *_progress_checks(client, pause),
+    ]
+
+
 async def check_animations(v: Validator) -> None:
     """Play every preset in every variant."""
     for name, play, question in _animation_checks(v.client, v.config.pause_seconds):
@@ -712,12 +758,15 @@ async def check_sounds(v: Validator) -> None:
     """Play every sound once in the voice language the DOT reports."""
     client = v.client
     language = _language_name(client.state)
-    await v.attempt("set_volume NORMAL", partial(client.set_volume, Volume.NORMAL))
+    await v.attempt(
+        f"set_volume {SOUND_CHECK_VOLUME.name}",
+        partial(client.set_volume, SOUND_CHECK_VOLUME),
+    )
     for sound in DotSound:
         animation = DotAnimation(
             type=DotAnimationType.MID_TO_OUTWARD_AND_BREATHE,
             color=DotColor.WHITE,
-            value=2,
+            value=SOUND_CHECK_LEDS,
             primary_sound=sound,
             end=DotEnd.FADE_OUT,
             cut_off=True,
@@ -733,7 +782,7 @@ async def check_sounds(v: Validator) -> None:
     both = DotAnimation(
         type=DotAnimationType.MID_TO_OUTWARD_AND_BREATHE,
         color=DotColor.WHITE,
-        value=2,
+        value=SOUND_CHECK_LEDS,
         primary_sound=DotSound.SFX_CONFIRM,
         secondary_sound=DotSound.SPEECH_ROADWORKS,
         end=DotEnd.FADE_OUT,
@@ -772,7 +821,7 @@ async def check_buttons(v: Validator) -> None:
         )
         mark = monitor.mark()
         await v.console.instruct(
-            f"Hold the {label} button for 3 seconds, then release it."
+            f"Hold the {label} button for {LONG_HOLD_SECONDS} seconds, then release it."
         )
         await monitor.wait_for_action(mark, button, ButtonAction.RELEASED, seconds)
         actions = monitor.buttons_since(mark, button)
@@ -905,7 +954,13 @@ async def check_reconnect(v: Validator) -> None:
 
 async def check_errors(v: Validator) -> None:
     """Check the errors the library promises and the plain lifecycle calls."""
-    client = v.client
+    await _check_not_ready(v)
+    await _check_validation(v)
+    await _check_progress_skips(v)
+    await _check_lifecycle(v)
+
+
+async def _check_not_ready(v: Validator) -> None:
     transport = v.transport
     fresh = FlitsmeisterDotClient(transport)
     v.expect(
@@ -926,6 +981,11 @@ async def check_errors(v: Validator) -> None:
     for name, call in calls:
         await v.raises(f"{name} before connect raises", DotNotReadyError, call)
     v.expect("nothing written before connect", transport.writes == writes)
+
+
+async def _check_validation(v: Validator) -> None:
+    client = v.client
+    transport = v.transport
 
     async def build(response_timeout: float, long_press: float) -> None:
         FlitsmeisterDotClient(
@@ -960,6 +1020,11 @@ async def check_errors(v: Validator) -> None:
         )
     v.expect("bad animations wrote nothing", transport.writes == writes)
     v.expect("session still ready after bad animations", client.ready)
+
+
+async def _check_progress_skips(v: Validator) -> None:
+    client = v.client
+    transport = v.transport
     half = animations.progress(color=DotColor.SUCCESS, fraction=0.5)
     if await v.attempt("progress 0.5", partial(client.play_animation, half)):
         writes = transport.writes
@@ -981,6 +1046,11 @@ async def check_errors(v: Validator) -> None:
             str(clamped.value),
         )
         await v.attempt(f"progress {fraction}", partial(client.play_animation, clamped))
+
+
+async def _check_lifecycle(v: Validator) -> None:
+    client = v.client
+    transport = v.transport
     connects = transport.connects
     await v.attempt("connect() while ready", client.connect)
     v.expect("connect() while ready does nothing", transport.connects == connects)
@@ -989,7 +1059,7 @@ async def check_errors(v: Validator) -> None:
         return
     v.expect("status DISCONNECTED", client.status is ConnectionStatus.DISCONNECTED)
     v.expect("connected is False", not client.connected)
-    await asyncio.sleep(1)
+    await asyncio.sleep(LOST_CALLBACK_GRACE_SECONDS)
     v.expect("disconnect() does not call connection_lost", len(v.monitor.lost) == lost)
     await v.raises(
         "play_animation after disconnect raises",
@@ -1019,6 +1089,7 @@ SECTION_CHECKS: dict[str, Callable[[Validator], Awaitable[None]]] = {
     "reconnect": check_reconnect,
     "errors": check_errors,
 }
+SECTIONS = tuple(SECTION_CHECKS)
 
 
 async def restore(
@@ -1146,7 +1217,10 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def config_from_args(argv: Sequence[str] | None = None) -> RunConfig:
-    """Parse the command line and take the address from the config file.
+    """Parse the command line and fill the connection options from the config file.
+
+    The config file supplies ``address``, ``proxy`` and ``noise_psk`` when
+    the command line leaves them unset.
 
     Raises:
         SystemExit: The config file is missing or not a JSON object.
