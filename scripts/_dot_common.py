@@ -6,10 +6,11 @@ import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
+from enum import Enum
 from pathlib import Path
 from types import TracebackType
-from typing import Self, TextIO
+from typing import Any, Self, TextIO
 from urllib.parse import urlsplit
 
 import habluetooth
@@ -19,6 +20,7 @@ from bleak_esphome import APIConnectionManager, ESPHomeDeviceConfig
 from flitsmeister_dot_ble import (
     BleTransport,
     DisconnectedCallback,
+    DotState,
     NotificationCallback,
     is_dot_advertisement,
 )
@@ -280,3 +282,32 @@ async def find_dot(scan: Scanner, address: str | None, seconds: float) -> BLEDev
             elif sighting.is_dot:
                 return sighting.device
     raise TimeoutError("Flitsmeister DOT was not found")
+
+
+def state_record(state: DotState) -> dict[str, object]:
+    """Return the state as a JSON friendly dict."""
+    record: dict[str, object] = {}
+    for field in fields(state):
+        value = getattr(state, field.name)
+        if isinstance(value, Enum):
+            value = value.name
+        record[field.name] = value
+    return record
+
+
+def load_config(path: Path) -> dict[str, Any]:
+    """Load the optional JSON config file, or an empty dict when missing.
+
+    Raises:
+        ValueError: The file is not valid JSON or does not hold a JSON
+            object.
+    """
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as err:
+        raise ValueError(f"{path} is not valid JSON: {err}") from err
+    if isinstance(data, dict):
+        return data
+    raise ValueError(f"{path} must contain a JSON object")

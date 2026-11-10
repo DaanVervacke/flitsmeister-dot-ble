@@ -7,15 +7,23 @@ with the serial number replaced by the probe's fixed fake value.
 import json
 from pathlib import Path
 
+import pytest
 from flitsmeister_dot_ble import (
+    Brightness,
     ButtonAction,
     ChargingState,
     DotButton,
+    DotProtocolError,
     FlitsmeisterDotClient,
+    LedOrientation,
     MotionStatus,
 )
 from flitsmeister_dot_ble.const import BUTTON_EVENTS_CHARACTERISTIC_UUID
-from flitsmeister_dot_ble.protocol import decode_button_event
+from flitsmeister_dot_ble.protocol import (
+    decode_brightness,
+    decode_button_event,
+    decode_led_orientation,
+)
 
 from .helpers import FakeTransport
 
@@ -53,6 +61,24 @@ async def test_dot_connect_read_capture_replays_through_the_client() -> None:
         assert client.state.serial_uuid is not None
         assert client.state.firmware_revision == "2.9.0"
         assert client.state.software_revision == "2.9.0"
+
+
+def test_brightness_maps_unknown_values_to_full() -> None:
+    assert decode_brightness(b"\x37") is Brightness.BRIGHTNESS_100
+
+
+def test_brightness_rejects_wrong_length() -> None:
+    with pytest.raises(DotProtocolError, match="1 byte"):
+        decode_brightness(b"\x64\x00")
+
+
+def test_led_orientation_maps_unknown_values_to_upside_down() -> None:
+    assert decode_led_orientation(b"\x05") is LedOrientation.UPSIDE_DOWN
+
+
+def test_led_orientation_rejects_wrong_length() -> None:
+    with pytest.raises(DotProtocolError, match="1 byte"):
+        decode_led_orientation(b"")
 
 
 def test_dot_button_events_from_capture_decode() -> None:

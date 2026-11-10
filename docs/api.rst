@@ -17,6 +17,33 @@ Default values of the ``FlitsmeisterDotClient`` options, in seconds.
 
 .. autodata:: flitsmeister_dot_ble.const.DEFAULT_RESPONSE_TIMEOUT_SECONDS
 
+.. autodata:: flitsmeister_dot_ble.const.DEFAULT_LONG_PRESS_SECONDS
+
+Animations
+----------
+
+.. automodule:: flitsmeister_dot_ble.animations
+   :members:
+
+Settings
+--------
+
+.. autoclass:: flitsmeister_dot_ble.Volume
+   :members:
+   :undoc-members:
+
+.. autoclass:: flitsmeister_dot_ble.Brightness
+   :members:
+   :undoc-members:
+
+.. autoclass:: flitsmeister_dot_ble.LedOrientation
+   :members:
+   :undoc-members:
+
+.. autoclass:: flitsmeister_dot_ble.SpeechLanguage
+   :members:
+   :undoc-members:
+
 Transports
 ----------
 

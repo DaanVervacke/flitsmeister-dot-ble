@@ -61,11 +61,12 @@ notification that fails to decode is logged as a warning and dropped,
 the session stays up. A malformed value read during `connect()` raises
 `DotProtocolError` and fails the connect.
 
-`FlitsmeisterDotClient` takes this keyword-only option, in seconds:
+`FlitsmeisterDotClient` takes these keyword-only options:
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `response_timeout_seconds` | 10 | limit for every transport call after the transport connect |
+| `long_press_seconds` | 1.0 | seconds a button must be held before a `LONG_PRESS` event |
 
 An invalid timing raises `DotValidationError`.
 
@@ -73,7 +74,61 @@ An invalid timing raises `DotValidationError`.
 motion status and the device information. The serial number is kept both
 as the raw hex bytes and as the UUID string the Flitsmeister app shows.
 Both derive from the same read, the app hashes the raw bytes with MD5
-into a version 3 UUID.
+into a version 3 UUID. The four settings mirror the last written value,
+brightness and LED orientation are read back from the device, volume and
+speech language are tracked locally after a write.
+
+## Animations
+
+`play_animation` writes one `DotAnimation` to the device. Build one with
+the preset functions in the `animations` submodule, every named
+animation the Flitsmeister app ships is there:
+
+```python
+from flitsmeister_dot_ble import animations
+
+await client.play_animation(animations.speed_trap())
+await client.play_animation(animations.progress(animations.DotColor.DANGER, 0.5))
+```
+
+The presets cover the alert catalog, speed trap, speed camera, average
+speed check, traffic jam, police hotspot, roadworks, incidents, lane
+closures, the emergency vehicles, railway crossings, both wrong way
+alerts, approach progress, overspeed, the reporting hold, startup,
+updating and both fade outs. `rateable=True`, the default, lets a
+button press rate the alert on the device, like the app does. The
+`DotAnimation` dataclass also builds custom packets: the type, color,
+LED count, both sounds and the end behavior are all fields, and
+`to_bytes` validates and encodes them.
+
+A progression top to bottom animation that equals the last one played
+is skipped, so repeated progress updates do not spam the device.
+
+## Settings
+
+| Method | Values |
+| --- | --- |
+| `set_volume` | `Volume.SILENT`, `LOW`, `NORMAL`, `HARD` |
+| `set_brightness` | `Brightness.BRIGHTNESS_10` to `BRIGHTNESS_100` in steps of 10 |
+| `set_led_orientation` | `LedOrientation.NORMAL`, `UPSIDE_DOWN` |
+| `set_speech_language` | `SpeechLanguage.ENGLISH`, `DUTCH`, `GERMAN`, `FRENCH` |
+
+Brightness and LED orientation are read back into the state after the
+write. `read_settings` reads both without writing, the Flitsmeister app
+reads them only after a write, so `connect()` leaves them unset. Every
+method raises `DotNotReadyError` before the session is ready and
+`DotConnectionError` after a failed session or a failed write.
+
+## Buttons
+
+Every button indication reaches the `update_callback` as a
+`DotButtonEvent` with the raw `PUSHED` or `RELEASED` action. The client
+also resolves the hold time: a release before `long_press_seconds`
+emits an extra `SHORT_PRESS`, holding past it emits a `LONG_PRESS`
+while the button is still down. The Flitsmeister app files a speed
+trap report for a long press on the red button and a dangerous
+situation report for the blue one, what happens after that is up to
+the caller.
 
 ## Connection loss
 
@@ -114,6 +169,22 @@ and `DOT_DEVICE_ADDRESS` environment variables preset the matching
 flags, and `--proxy` routes the scan and the connection through an
 ESPHome Bluetooth proxy.
 
+## Drive
+
+`scripts/drive_dot_client.py` drives the library against a real DOT:
+
+```bash
+uv run python -m scripts.drive_dot_client
+```
+
+Read-only by default it prints every update as a JSON line. With
+`--controls` it plays every animation preset and cycles the settings
+once. That flag needs the local config file
+`scripts/drive_dot_client.local.json` as confirmation, because the
+device in range is the real thing. The config file is a JSON object
+holding `proxy`, `noise_psk` and `address`, command line arguments win
+over it.
+
 ## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the setup, the check gate and
@@ -136,7 +207,5 @@ next.
 
 ## Roadmap
 
-- Animation writes with the full preset catalog from the Flitsmeister app
-- Short and long press resolution on the button events
-- Volume, brightness, LED rotation and speech language settings
-- A drive script that triggers every preset against a real DOT
+- Validate the animation presets against a real DOT with the drive script
+- A Home Assistant custom integration on top of this library

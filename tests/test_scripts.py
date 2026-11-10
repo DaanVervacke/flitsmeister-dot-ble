@@ -6,13 +6,23 @@ from pathlib import Path
 
 import pytest
 from bleak.backends.device import BLEDevice
-from flitsmeister_dot_ble import FlitsmeisterDotClient, is_dot_advertisement
+from flitsmeister_dot_ble import (
+    Brightness,
+    FlitsmeisterDotClient,
+    LedOrientation,
+    SpeechLanguage,
+    Volume,
+    animations,
+    is_dot_advertisement,
+)
 from flitsmeister_dot_ble.const import (
     BATTERY_LEVEL_CHARACTERISTIC_UUID,
+    BRIGHTNESS_CHARACTERISTIC_UUID,
+    LED_ROTATION_CHARACTERISTIC_UUID,
     SERIAL_NUMBER_CHARACTERISTIC_UUID,
 )
 from scripts import _dot_common as common
-from scripts import probe_dot
+from scripts import drive_dot_client, probe_dot
 
 from .helpers import FakeTransport, make_client
 
@@ -304,3 +314,90 @@ async def test_client_works_through_capture_transport(tmp_path: Path) -> None:
         async with FlitsmeisterDotClient(common.CaptureTransport(inner, writer)):
             pass
     assert inner.disconnect_calls == 1
+
+
+def test_drive_needs_confirmation(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit):
+        drive_dot_client.config_from_args(
+            ["--controls", "--config", str(tmp_path / "none.json")]
+        )
+
+
+def test_drive_rejects_invalid_config(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "local.json"
+    path.write_text("not json")
+    with pytest.raises(SystemExit) as exc_info:
+        drive_dot_client.config_from_args(["--config", str(path)])
+    assert exc_info.value.code == 2
+    assert "local.json is not valid JSON" in capsys.readouterr().err
+
+
+def test_drive_merges_config(tmp_path: Path) -> None:
+    path = tmp_path / "local.json"
+    path.write_text('{"proxy": "proxy.local", "address": "AA"}')
+    config = drive_dot_client.config_from_args(
+        ["--config", str(path), "--address", "BB", "--duration", "1"]
+    )
+    assert config.proxy == "proxy.local"
+    assert config.address == "BB"
+    assert config.duration == 1
+    assert not config.controls
+
+
+def _run_config(**changes: object) -> drive_dot_client.RunConfig:
+    values: dict[str, object] = {
+        "proxy": None,
+        "noise_psk": None,
+        "address": None,
+        "output": None,
+        "scan_seconds": 0.0,
+        "duration": 0.0,
+        "pause_seconds": 0.0,
+        "controls": False,
+    }
+    values.update(changes)
+    return drive_dot_client.RunConfig(**values)  # type: ignore[arg-type]
+
+
+async def test_drive_read_only(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    transport = FakeTransport()
+    await drive_dot_client.run(_run_config(), transport)
+    assert transport.writes == []
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 8
+    first = json.loads(lines[0])
+    assert first["characteristic"] == BATTERY_LEVEL_CHARACTERISTIC_UUID
+    assert first["state"]["battery_level"] == 100
+
+
+async def test_drive_controls() -> None:
+    transport = FakeTransport()
+    await drive_dot_client.run(_run_config(controls=True), transport)
+    writes = transport.writes
+    assert animations.startup().to_bytes() in writes
+    assert animations.speed_trap().to_bytes() in writes
+    assert animations.fade_out().to_bytes() in writes
+    assert bytes((Volume.SILENT,)) in writes
+    assert bytes((Volume.HARD,)) in writes
+    assert bytes((Brightness.BRIGHTNESS_10,)) in writes
+    assert bytes((LedOrientation.UPSIDE_DOWN,)) in writes
+    assert bytes((SpeechLanguage.DUTCH,)) in writes
+    assert transport.read_characteristics.count(BRIGHTNESS_CHARACTERISTIC_UUID) == 2
+    assert transport.read_characteristics.count(LED_ROTATION_CHARACTERISTIC_UUID) == 2
+
+
+def test_drive_main_reports_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    async def failing(_config: drive_dot_client.RunConfig) -> None:
+        await asyncio.sleep(0)
+        raise RuntimeError("no adapter")
+
+    monkeypatch.setattr(drive_dot_client, "connect_and_run", failing)
+    assert drive_dot_client.main(["--config", str(tmp_path / "none.json")]) == 1
+    assert "no adapter" in caplog.text
+    assert any(record.exc_info for record in caplog.records)

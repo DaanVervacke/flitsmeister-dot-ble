@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from enum import IntEnum, StrEnum
 
 __all__ = [
+    "Brightness",
     "ButtonAction",
     "ChargingState",
     "ConnectionStatus",
@@ -16,7 +17,10 @@ __all__ = [
     "DotButtonEvent",
     "DotState",
     "DotUpdate",
+    "LedOrientation",
     "MotionStatus",
+    "SpeechLanguage",
+    "Volume",
 ]
 
 
@@ -78,6 +82,50 @@ class MotionStatus(IntEnum):
     DRIVING = 1
 
 
+class Volume(IntEnum):
+    """Speaker volume written to the volume characteristic."""
+
+    SILENT = 0
+    LOW = 1
+    NORMAL = 2
+    HARD = 3
+
+
+class Brightness(IntEnum):
+    """LED brightness written to the brightness characteristic, in percent."""
+
+    BRIGHTNESS_10 = 10
+    BRIGHTNESS_20 = 20
+    BRIGHTNESS_30 = 30
+    BRIGHTNESS_40 = 40
+    BRIGHTNESS_50 = 50
+    BRIGHTNESS_60 = 60
+    BRIGHTNESS_70 = 70
+    BRIGHTNESS_80 = 80
+    BRIGHTNESS_90 = 90
+    BRIGHTNESS_100 = 100
+
+
+class LedOrientation(IntEnum):
+    """LED ring orientation written to the LED rotation characteristic."""
+
+    NORMAL = 0
+    UPSIDE_DOWN = 1
+
+
+class SpeechLanguage(IntEnum):
+    """Voice language written to the speech language characteristic.
+
+    The Flitsmeister app maps Flemish to Dutch and every language it
+    does not ship a voice for to English.
+    """
+
+    ENGLISH = 0
+    DUTCH = 1
+    GERMAN = 2
+    FRENCH = 3
+
+
 @dataclass(frozen=True, slots=True)
 class DotButtonEvent:
     """One button event decoded from the button events characteristic.
@@ -95,7 +143,10 @@ class DotState:
 
     Every field is None until the device reported it. ``serial_raw``
     holds the hex bytes of the serial number read, ``serial_uuid`` the
-    uppercase UUID string the Flitsmeister app derives from them.
+    uppercase UUID string the Flitsmeister app derives from them. The
+    four settings mirror the last written value, brightness and LED
+    orientation are read back from the device, volume and speech
+    language are tracked locally after a write.
     """
 
     battery_level: int | None = None
@@ -107,6 +158,10 @@ class DotState:
     serial_uuid: str | None = None
     firmware_revision: str | None = None
     software_revision: str | None = None
+    volume: Volume | None = None
+    brightness: Brightness | None = None
+    led_orientation: LedOrientation | None = None
+    speech_language: SpeechLanguage | None = None
 
 
 @dataclass(frozen=True, slots=True)

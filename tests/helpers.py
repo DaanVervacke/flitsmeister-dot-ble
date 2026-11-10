@@ -13,7 +13,9 @@ from flitsmeister_dot_ble import (
 from flitsmeister_dot_ble.const import (
     BATTERY_CHARGING_CHARACTERISTIC_UUID,
     BATTERY_LEVEL_CHARACTERISTIC_UUID,
+    BRIGHTNESS_CHARACTERISTIC_UUID,
     FIRMWARE_REVISION_CHARACTERISTIC_UUID,
+    LED_ROTATION_CHARACTERISTIC_UUID,
     MANUFACTURER_NAME_CHARACTERISTIC_UUID,
     MODEL_NUMBER_CHARACTERISTIC_UUID,
     MOTION_CHARACTERISTIC_UUID,
@@ -28,6 +30,8 @@ DEFAULT_READS: dict[str, bytes] = {
     BATTERY_LEVEL_CHARACTERISTIC_UUID: b"\x64",
     BATTERY_CHARGING_CHARACTERISTIC_UUID: b"\x00\x00\x01",
     MOTION_CHARACTERISTIC_UUID: b"\x00",
+    BRIGHTNESS_CHARACTERISTIC_UUID: b"\x64",
+    LED_ROTATION_CHARACTERISTIC_UUID: b"\x00",
     MANUFACTURER_NAME_CHARACTERISTIC_UUID: b"Flitsmeister",
     MODEL_NUMBER_CHARACTERISTIC_UUID: b"DOT",
     SERIAL_NUMBER_CHARACTERISTIC_UUID: b"\x11\x22\x33",
@@ -122,12 +126,14 @@ def make_client(
     transport: BleTransport,
     *,
     response_timeout_seconds: float = 1.0,
+    long_press_seconds: float = 1.0,
     update_callback: UpdateCallback | None = None,
     connection_lost_callback: ConnectionLostCallback | None = None,
 ) -> FlitsmeisterDotClient:
     return FlitsmeisterDotClient(
         transport,
         response_timeout_seconds=response_timeout_seconds,
+        long_press_seconds=long_press_seconds,
         update_callback=update_callback,
         connection_lost_callback=connection_lost_callback,
     )

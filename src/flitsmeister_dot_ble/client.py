@@ -11,38 +11,59 @@ import asyncio
 import logging
 import math
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from enum import Enum, auto
 from functools import partial
 from types import TracebackType
 from typing import Final, Self, TypeAlias
 
+from .animations import DotAnimation, DotAnimationType
 from .const import (
+    ANIMATION_CHARACTERISTIC_UUID,
     BATTERY_CHARGING_CHARACTERISTIC_UUID,
     BATTERY_LEVEL_CHARACTERISTIC_UUID,
+    BRIGHTNESS_CHARACTERISTIC_UUID,
     BUTTON_EVENTS_CHARACTERISTIC_UUID,
+    DEFAULT_LONG_PRESS_SECONDS,
     DEFAULT_RESPONSE_TIMEOUT_SECONDS,
     FIRMWARE_REVISION_CHARACTERISTIC_UUID,
+    LED_ROTATION_CHARACTERISTIC_UUID,
     MANUFACTURER_NAME_CHARACTERISTIC_UUID,
     MODEL_NUMBER_CHARACTERISTIC_UUID,
     MOTION_CHARACTERISTIC_UUID,
     READ_CHARACTERISTICS,
     SERIAL_NUMBER_CHARACTERISTIC_UUID,
     SOFTWARE_REVISION_CHARACTERISTIC_UUID,
+    SPEECH_LANGUAGE_CHARACTERISTIC_UUID,
     SUBSCRIBE_CHARACTERISTICS,
+    VOLUME_CHARACTERISTIC_UUID,
 )
 from .exceptions import (
     DotConnectionError,
     DotError,
+    DotNotReadyError,
     DotProtocolError,
     DotTimeoutError,
     DotValidationError,
 )
-from .models import ConnectionStatus, DotButtonEvent, DotState, DotUpdate
+from .models import (
+    Brightness,
+    ButtonAction,
+    ConnectionStatus,
+    DotButton,
+    DotButtonEvent,
+    DotState,
+    DotUpdate,
+    LedOrientation,
+    SpeechLanguage,
+    Volume,
+)
 from .protocol import (
     decode_battery_level,
+    decode_brightness,
     decode_button_event,
     decode_charging_state,
+    decode_led_orientation,
     decode_motion_status,
     decode_text,
     serial_number_uuid,
@@ -97,6 +118,18 @@ _PHASE_STATUS: Final[Mapping[_Phase, ConnectionStatus]] = {
 }
 _LIVE_PHASES = frozenset((_Phase.CONNECTED, _Phase.READY))
 
+_TRANSPORT_ERRORS = (OSError, TimeoutError)
+
+
+@dataclass(slots=True)
+class _ButtonPress:
+    """One held button and the timer that resolves its long press."""
+
+    payload: bytes
+    timer: asyncio.Task[None]
+    long_fired: bool = False
+
+
 _Decoder = Callable[[DotState, bytes], tuple[DotState, DotButtonEvent | None]]
 
 
@@ -110,6 +143,14 @@ def _decode_charging(state: DotState, payload: bytes) -> tuple[DotState, None]:
 
 def _decode_motion(state: DotState, payload: bytes) -> tuple[DotState, None]:
     return replace(state, motion_status=decode_motion_status(payload)), None
+
+
+def _decode_brightness(state: DotState, payload: bytes) -> tuple[DotState, None]:
+    return replace(state, brightness=decode_brightness(payload)), None
+
+
+def _decode_led_orientation(state: DotState, payload: bytes) -> tuple[DotState, None]:
+    return replace(state, led_orientation=decode_led_orientation(payload)), None
 
 
 def _decode_button(state: DotState, payload: bytes) -> tuple[DotState, DotButtonEvent]:
@@ -147,6 +188,8 @@ _DECODERS: Final[dict[str, _Decoder]] = {
     BATTERY_LEVEL_CHARACTERISTIC_UUID: _decode_battery,
     BATTERY_CHARGING_CHARACTERISTIC_UUID: _decode_charging,
     MOTION_CHARACTERISTIC_UUID: _decode_motion,
+    BRIGHTNESS_CHARACTERISTIC_UUID: _decode_brightness,
+    LED_ROTATION_CHARACTERISTIC_UUID: _decode_led_orientation,
     BUTTON_EVENTS_CHARACTERISTIC_UUID: _decode_button,
     MANUFACTURER_NAME_CHARACTERISTIC_UUID: _decode_manufacturer,
     MODEL_NUMBER_CHARACTERISTIC_UUID: _decode_model,
@@ -156,15 +199,18 @@ _DECODERS: Final[dict[str, _Decoder]] = {
 }
 
 
-def _check_timing(response_timeout_seconds: float) -> None:
-    if isinstance(response_timeout_seconds, bool) or not isinstance(
-        response_timeout_seconds, int | float
-    ):
-        raise DotValidationError("response_timeout_seconds must be a number")
-    if not math.isfinite(response_timeout_seconds):
-        raise DotValidationError("response_timeout_seconds must be finite")
-    if response_timeout_seconds <= 0:
-        raise DotValidationError("response_timeout_seconds must be above 0")
+def _check_timings(response_timeout_seconds: float, long_press_seconds: float) -> None:
+    timings = {
+        "response_timeout_seconds": response_timeout_seconds,
+        "long_press_seconds": long_press_seconds,
+    }
+    for name, value in timings.items():
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise DotValidationError(f"{name} must be a number")
+        if not math.isfinite(value):
+            raise DotValidationError(f"{name} must be finite")
+        if value <= 0:
+            raise DotValidationError(f"{name} must be above 0")
 
 
 class FlitsmeisterDotClient:
@@ -175,6 +221,7 @@ class FlitsmeisterDotClient:
         transport: BleTransport,
         *,
         response_timeout_seconds: float = DEFAULT_RESPONSE_TIMEOUT_SECONDS,
+        long_press_seconds: float = DEFAULT_LONG_PRESS_SECONDS,
         update_callback: UpdateCallback | None = None,
         connection_lost_callback: ConnectionLostCallback | None = None,
     ) -> None:
@@ -185,6 +232,9 @@ class FlitsmeisterDotClient:
             response_timeout_seconds: Seconds allowed for every transport
                 call after the transport connect. The transport sets its
                 own connect timeout.
+            long_press_seconds: Seconds a button must be held before the
+                client emits a ``LONG_PRESS`` event. The Flitsmeister
+                app sends its report after a full second.
             update_callback: Called, sync or async, with a ``DotUpdate``
                 for every decoded value, including the values read
                 during ``connect()``. It must return quickly.
@@ -193,22 +243,26 @@ class FlitsmeisterDotClient:
                 ``disconnect()`` or for a failed ``connect()``.
 
         Raises:
-            DotValidationError: ``response_timeout_seconds`` is not a
-                finite number above 0.
+            DotValidationError: A timing is not a finite number above 0.
         """
-        _check_timing(response_timeout_seconds)
+        _check_timings(response_timeout_seconds, long_press_seconds)
         self.transport = transport
         self.update_callback = update_callback
         self.connection_lost_callback = connection_lost_callback
         self._response_timeout = response_timeout_seconds
+        self._long_press_seconds = long_press_seconds
         self._state = DotState()
         self._phase = _Phase.IDLE
         self._lifecycle_lock = asyncio.Lock()
+        self._write_lock = asyncio.Lock()
         self._notifications: asyncio.Queue[tuple[str, bytes] | None] = asyncio.Queue()
         self._worker: asyncio.Task[None] | None = None
         self._connect_tasks: set[asyncio.Task[None]] = set()
         self._recovery_task: asyncio.Task[None] | None = None
         self._close_requests = 0
+        self._session_failure: Exception | None = None
+        self._last_animation: DotAnimation | None = None
+        self._presses: dict[DotButton, _ButtonPress] = {}
 
     @property
     def state(self) -> DotState:
@@ -294,6 +348,103 @@ class FlitsmeisterDotClient:
         traceback: TracebackType | None,
     ) -> None:
         await self.disconnect()
+
+    async def play_animation(self, animation: DotAnimation) -> None:
+        """Play one animation on the device.
+
+        A progression top to bottom animation that equals the last one
+        played is skipped, like the Flitsmeister app does, so repeated
+        progress updates do not spam the device.
+
+        Args:
+            animation: The animation to play, built by one of the preset
+                functions in ``animations`` or by hand.
+
+        Raises:
+            DotNotReadyError: The session is not ready.
+            DotConnectionError: The session failed earlier or the write
+                failed. Transport errors are chained as ``__cause__``.
+            DotValidationError: The animation does not fit the packet.
+        """
+        if self._is_duplicate(animation):
+            return
+        await self._send(
+            ANIMATION_CHARACTERISTIC_UUID, animation.to_bytes(), "animation"
+        )
+        self._last_animation = animation
+
+    async def set_volume(self, volume: Volume) -> None:
+        """Set the speaker volume.
+
+        The device does not report the volume, so the state mirrors the
+        written value.
+
+        Raises:
+            DotNotReadyError: The session is not ready.
+            DotConnectionError: The session failed earlier or the write
+                failed.
+        """
+        await self._send(VOLUME_CHARACTERISTIC_UUID, bytes((volume,)), "volume")
+        self._state = replace(self._state, volume=volume)
+
+    async def set_brightness(self, brightness: Brightness) -> None:
+        """Set the LED brightness and read it back into the state.
+
+        Raises:
+            DotNotReadyError: The session is not ready.
+            DotConnectionError: The session failed earlier, the write or
+                the read back failed, or the device returned a malformed
+                value.
+        """
+        await self._send(
+            BRIGHTNESS_CHARACTERISTIC_UUID, bytes((brightness,)), "brightness"
+        )
+        await self._read_and_apply(BRIGHTNESS_CHARACTERISTIC_UUID)
+
+    async def set_led_orientation(self, orientation: LedOrientation) -> None:
+        """Set the LED ring orientation and read it back into the state.
+
+        Raises:
+            DotNotReadyError: The session is not ready.
+            DotConnectionError: The session failed earlier, the write or
+                the read back failed, or the device returned a malformed
+                value.
+        """
+        await self._send(
+            LED_ROTATION_CHARACTERISTIC_UUID, bytes((orientation,)), "orientation"
+        )
+        await self._read_and_apply(LED_ROTATION_CHARACTERISTIC_UUID)
+
+    async def set_speech_language(self, language: SpeechLanguage) -> None:
+        """Set the voice language.
+
+        The device does not report the language, so the state mirrors
+        the written value.
+
+        Raises:
+            DotNotReadyError: The session is not ready.
+            DotConnectionError: The session failed earlier or the write
+                failed.
+        """
+        await self._send(
+            SPEECH_LANGUAGE_CHARACTERISTIC_UUID, bytes((language,)), "language"
+        )
+        self._state = replace(self._state, speech_language=language)
+
+    async def read_settings(self) -> None:
+        """Read brightness and LED orientation into the state.
+
+        The Flitsmeister app reads both only after a write, so
+        ``connect()`` leaves them unset until this method or a setting
+        write fills them.
+
+        Raises:
+            DotNotReadyError: The session is not ready.
+            DotConnectionError: The session failed earlier, a read
+                failed, or the device returned a malformed value.
+        """
+        await self._read_and_apply(BRIGHTNESS_CHARACTERISTIC_UUID)
+        await self._read_and_apply(LED_ROTATION_CHARACTERISTIC_UUID)
 
     @property
     def _closing(self) -> bool:
@@ -383,17 +534,112 @@ class FlitsmeisterDotClient:
     async def _apply(self, characteristic: str, payload: bytes) -> None:
         state, button = self._decode(characteristic, payload)
         self._state = state
+        await self._emit(characteristic, payload, button)
+        if button is not None:
+            await self._resolve_press(button, payload)
+
+    async def _emit(
+        self, characteristic: str, payload: bytes, button: DotButtonEvent | None
+    ) -> None:
         callback = self.update_callback
         if callback is None:
             return
         try:
             result = callback(
-                DotUpdate(state, self.status, characteristic, payload, button)
+                DotUpdate(self._state, self.status, characteristic, payload, button)
             )
             if result is not None:
                 await result
         except Exception:
             _LOGGER.exception("DOT update callback failed")
+
+    async def _resolve_press(self, event: DotButtonEvent, payload: bytes) -> None:
+        if event.action is ButtonAction.PUSHED:
+            self._presses[event.button] = _ButtonPress(
+                payload=payload,
+                timer=asyncio.get_running_loop().create_task(
+                    self._long_press(event.button)
+                ),
+            )
+            return
+        if event.action is not ButtonAction.RELEASED:
+            return
+        press = self._presses.pop(event.button, None)
+        if press is None or press.long_fired:
+            return
+        press.timer.cancel()
+        await self._emit(
+            BUTTON_EVENTS_CHARACTERISTIC_UUID,
+            press.payload,
+            DotButtonEvent(event.button, ButtonAction.SHORT_PRESS),
+        )
+
+    async def _long_press(self, button: DotButton) -> None:
+        await asyncio.sleep(self._long_press_seconds)
+        press = self._presses.get(button)
+        if press is None:
+            return
+        press.long_fired = True
+        await self._emit(
+            BUTTON_EVENTS_CHARACTERISTIC_UUID,
+            press.payload,
+            DotButtonEvent(button, ButtonAction.LONG_PRESS),
+        )
+
+    async def _cancel_presses(self) -> None:
+        presses = list(self._presses.values())
+        self._presses.clear()
+        for press in presses:
+            press.timer.cancel()
+        if presses:
+            await asyncio.gather(
+                *(press.timer for press in presses), return_exceptions=True
+            )
+
+    def _is_duplicate(self, animation: DotAnimation) -> bool:
+        last = self._last_animation
+        return (
+            last is not None
+            and last.type is DotAnimationType.PROGRESSION_TOP_TO_BOTTOM
+            and animation == last
+        )
+
+    def _raise_if_session_failed(self) -> None:
+        failure = self._session_failure
+        if failure is not None:
+            raise DotConnectionError(f"The DOT session failed: {failure}") from failure
+
+    def _require_ready(self) -> None:
+        self._raise_if_session_failed()
+        if not self.ready:
+            raise DotNotReadyError("The DOT session is not ready")
+
+    async def _write(self, characteristic: str, data: bytes) -> None:
+        async with self._write_lock:
+            async with asyncio.timeout(self._response_timeout):
+                await self.transport.write_gatt_char(
+                    characteristic, data, response=True
+                )
+
+    async def _send(self, characteristic: str, data: bytes, label: str) -> None:
+        self._require_ready()
+        try:
+            await self._write(characteristic, data)
+        except _TRANSPORT_ERRORS as err:
+            failure = DotConnectionError(f"Writing {label} to the DOT failed")
+            self._fail(failure)
+            raise DotConnectionError(f"Writing {label} to the DOT failed") from err
+
+    async def _read_and_apply(self, characteristic: str) -> None:
+        self._require_ready()
+        try:
+            async with asyncio.timeout(self._response_timeout):
+                payload = await self.transport.read_gatt_char(characteristic)
+        except _TRANSPORT_ERRORS as err:
+            failure = DotConnectionError("Reading the DOT failed")
+            self._fail(failure)
+            raise DotConnectionError("Reading the DOT failed") from err
+        await self._apply(characteristic, payload)
 
     def _decode(
         self, characteristic: str, payload: bytes
@@ -409,6 +655,7 @@ class FlitsmeisterDotClient:
     def _fail(self, error: Exception) -> None:
         if self._closing or not self.connected:
             return
+        self._session_failure = error
         if self._phase is _Phase.CONNECTED:
             self._phase = _Phase.CLOSING
             return
@@ -448,6 +695,7 @@ class FlitsmeisterDotClient:
                 )
             await self._quietly("disconnect", self.transport.disconnect)
         await self._stop_worker()
+        await self._cancel_presses()
         self._phase = _Phase.IDLE
 
     async def _quietly(self, label: str, action: Callable[[], Awaitable[None]]) -> None:
@@ -470,3 +718,5 @@ class FlitsmeisterDotClient:
 
     def _reset_session(self) -> None:
         self._state = DotState()
+        self._session_failure = None
+        self._last_animation = None

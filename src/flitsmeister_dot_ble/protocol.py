@@ -10,12 +10,22 @@ from uuid import UUID
 
 from .const import DEVICE_NAME, SERVICE_UUID
 from .exceptions import DotProtocolError
-from .models import ButtonAction, ChargingState, DotButton, DotButtonEvent, MotionStatus
+from .models import (
+    Brightness,
+    ButtonAction,
+    ChargingState,
+    DotButton,
+    DotButtonEvent,
+    LedOrientation,
+    MotionStatus,
+)
 
 __all__ = [
     "decode_battery_level",
+    "decode_brightness",
     "decode_button_event",
     "decode_charging_state",
+    "decode_led_orientation",
     "decode_motion_status",
     "decode_text",
     "is_dot_advertisement",
@@ -87,6 +97,40 @@ def decode_motion_status(payload: bytes) -> MotionStatus:
     if payload[0] == MotionStatus.PARKED:
         return MotionStatus.PARKED
     return MotionStatus.DRIVING
+
+
+def decode_brightness(payload: bytes) -> Brightness:
+    """Decode the brightness from the brightness characteristic.
+
+    The Flitsmeister app maps an unknown value to full brightness.
+
+    Raises:
+        DotProtocolError: The payload is not one byte.
+    """
+    if len(payload) != 1:
+        raise DotProtocolError(f"Brightness payload must be 1 byte, got {len(payload)}")
+    try:
+        return Brightness(payload[0])
+    except ValueError:
+        return Brightness.BRIGHTNESS_100
+
+
+def decode_led_orientation(payload: bytes) -> LedOrientation:
+    """Decode the LED orientation from the LED rotation characteristic.
+
+    The Flitsmeister app maps an unknown value to upside down.
+
+    Raises:
+        DotProtocolError: The payload is not one byte.
+    """
+    if len(payload) != 1:
+        raise DotProtocolError(
+            f"LED orientation payload must be 1 byte, got {len(payload)}"
+        )
+    try:
+        return LedOrientation(payload[0])
+    except ValueError:
+        return LedOrientation.UPSIDE_DOWN
 
 
 def decode_button_event(payload: bytes) -> DotButtonEvent:

@@ -8,7 +8,9 @@ from flitsmeister_dot_ble import (
     ConnectionStatus,
     DotButton,
     DotButtonEvent,
+    DotColor,
     DotConnectionError,
+    DotNotReadyError,
     DotProtocolError,
     DotState,
     DotTimeoutError,
@@ -16,12 +18,24 @@ from flitsmeister_dot_ble import (
     DotValidationError,
     FlitsmeisterDotClient,
     MotionStatus,
+    animations,
 )
 from flitsmeister_dot_ble.const import (
+    ANIMATION_CHARACTERISTIC_UUID,
     BATTERY_LEVEL_CHARACTERISTIC_UUID,
+    BRIGHTNESS_CHARACTERISTIC_UUID,
     BUTTON_EVENTS_CHARACTERISTIC_UUID,
+    LED_ROTATION_CHARACTERISTIC_UUID,
     READ_CHARACTERISTICS,
+    SPEECH_LANGUAGE_CHARACTERISTIC_UUID,
     SUBSCRIBE_CHARACTERISTICS,
+    VOLUME_CHARACTERISTIC_UUID,
+)
+from flitsmeister_dot_ble.models import (
+    Brightness,
+    LedOrientation,
+    SpeechLanguage,
+    Volume,
 )
 
 from .helpers import FakeTransport, drain, make_client
@@ -424,3 +438,225 @@ async def test_state_starts_empty(transport: FakeTransport) -> None:
     assert client.status is ConnectionStatus.DISCONNECTED
     assert not client.connected
     assert not client.ready
+
+
+async def test_play_animation_writes_the_packet(transport: FakeTransport) -> None:
+    client = make_client(transport)
+    async with client:
+        await client.play_animation(animations.speed_trap())
+
+    assert transport.writes == [bytes.fromhex("01ff00284a030c200101")]
+    assert transport.write_characteristics == [ANIMATION_CHARACTERISTIC_UUID]
+    assert transport.responses == [True]
+
+
+async def test_play_animation_skips_duplicate_progression(
+    transport: FakeTransport,
+) -> None:
+    client = make_client(transport)
+    async with client:
+        await client.play_animation(
+            animations.progress(color=DotColor.SPEED_TRAP, fraction=0.5)
+        )
+        await client.play_animation(
+            animations.progress(color=DotColor.SPEED_TRAP, fraction=0.5)
+        )
+        await client.play_animation(animations.speed_trap())
+        await client.play_animation(animations.speed_trap())
+
+    assert len(transport.writes) == 3
+
+
+async def test_play_animation_needs_a_ready_session(
+    transport: FakeTransport,
+) -> None:
+    client = make_client(transport)
+
+    with pytest.raises(DotNotReadyError, match="not ready"):
+        await client.play_animation(animations.fade_out())
+
+    assert transport.writes == []
+
+
+async def test_failed_write_ends_the_session(transport: FakeTransport) -> None:
+    client = make_client(transport)
+    await client.connect()
+    transport.fail_writes = True
+
+    with pytest.raises(DotConnectionError, match="Writing animation"):
+        await client.play_animation(animations.fade_out())
+    await asyncio.sleep(0)
+    with pytest.raises(DotConnectionError, match="session failed"):
+        await client.play_animation(animations.fade_out())
+    await client.disconnect()
+
+
+async def test_set_volume_writes_and_mirrors(transport: FakeTransport) -> None:
+    client = make_client(transport)
+    async with client:
+        await client.set_volume(Volume.HARD)
+
+        assert client.state.volume is Volume.HARD
+
+    assert transport.writes == [b"\x03"]
+    assert transport.write_characteristics == [VOLUME_CHARACTERISTIC_UUID]
+
+
+async def test_set_brightness_writes_and_reads_back(
+    transport: FakeTransport,
+) -> None:
+    client = make_client(transport)
+    async with client:
+        await client.set_brightness(Brightness.BRIGHTNESS_50)
+
+        assert client.state.brightness is Brightness.BRIGHTNESS_100
+
+    assert transport.writes == [b"\x32"]
+    assert transport.write_characteristics == [BRIGHTNESS_CHARACTERISTIC_UUID]
+    assert transport.read_characteristics.count(BRIGHTNESS_CHARACTERISTIC_UUID) == 1
+
+
+async def test_set_led_orientation_writes_and_reads_back(
+    transport: FakeTransport,
+) -> None:
+    client = make_client(transport)
+    async with client:
+        await client.set_led_orientation(LedOrientation.UPSIDE_DOWN)
+
+        assert client.state.led_orientation is LedOrientation.NORMAL
+
+    assert transport.writes == [b"\x01"]
+    assert transport.write_characteristics == [LED_ROTATION_CHARACTERISTIC_UUID]
+    assert transport.read_characteristics.count(LED_ROTATION_CHARACTERISTIC_UUID) == 1
+
+
+async def test_set_speech_language_writes_and_mirrors(
+    transport: FakeTransport,
+) -> None:
+    client = make_client(transport)
+    async with client:
+        await client.set_speech_language(SpeechLanguage.GERMAN)
+
+        assert client.state.speech_language is SpeechLanguage.GERMAN
+
+    assert transport.writes == [b"\x02"]
+    assert transport.write_characteristics == [SPEECH_LANGUAGE_CHARACTERISTIC_UUID]
+
+
+async def test_read_settings_fills_the_state(transport: FakeTransport) -> None:
+    client = make_client(transport)
+    async with client:
+        assert client.state.brightness is None
+        assert client.state.led_orientation is None
+
+        await client.read_settings()
+        state = client.state
+
+        assert state.brightness is Brightness.BRIGHTNESS_100
+        assert state.led_orientation is LedOrientation.NORMAL
+
+
+async def test_malformed_settings_read_raises(transport: FakeTransport) -> None:
+    transport.reads[BRIGHTNESS_CHARACTERISTIC_UUID] = b""
+    client = make_client(transport)
+    async with client:
+        with pytest.raises(DotProtocolError, match="1 byte"):
+            await client.read_settings()
+
+
+async def test_failed_read_back_ends_the_session(transport: FakeTransport) -> None:
+    client = make_client(transport)
+    await client.connect()
+    transport.fail_read = OSError("link lost")
+
+    with pytest.raises(DotConnectionError, match="Reading the DOT failed"):
+        await client.set_brightness(Brightness.BRIGHTNESS_50)
+    await asyncio.sleep(0)
+    with pytest.raises(DotConnectionError, match="session failed"):
+        await client.set_brightness(Brightness.BRIGHTNESS_50)
+    await client.disconnect()
+
+
+async def test_short_press_resolves(transport: FakeTransport) -> None:
+    actions: list[ButtonAction] = []
+
+    async def collect(update: DotUpdate) -> None:
+        if update.button is not None:
+            actions.append(update.button.action)
+
+    client = make_client(transport, update_callback=collect)
+    async with client:
+        transport.notify(BUTTON_EVENTS_CHARACTERISTIC_UUID, b"\x01\x00")
+        await drain(client)
+        transport.notify(BUTTON_EVENTS_CHARACTERISTIC_UUID, b"\x02\x00")
+        await drain(client)
+
+    assert actions == [
+        ButtonAction.PUSHED,
+        ButtonAction.RELEASED,
+        ButtonAction.SHORT_PRESS,
+    ]
+
+
+async def test_long_press_resolves_at_the_threshold(
+    transport: FakeTransport,
+) -> None:
+    actions: list[ButtonAction] = []
+
+    async def collect(update: DotUpdate) -> None:
+        if update.button is not None:
+            actions.append(update.button.action)
+
+    client = make_client(transport, update_callback=collect, long_press_seconds=0.05)
+    async with client:
+        transport.notify(BUTTON_EVENTS_CHARACTERISTIC_UUID, b"\x00\x01")
+        await drain(client)
+        await asyncio.sleep(0.1)
+        transport.notify(BUTTON_EVENTS_CHARACTERISTIC_UUID, b"\x00\x02")
+        await drain(client)
+
+    assert actions == [
+        ButtonAction.PUSHED,
+        ButtonAction.LONG_PRESS,
+        ButtonAction.RELEASED,
+    ]
+
+
+async def test_release_without_push_only_releases(
+    transport: FakeTransport,
+) -> None:
+    actions: list[ButtonAction] = []
+
+    async def collect(update: DotUpdate) -> None:
+        if update.button is not None:
+            actions.append(update.button.action)
+
+    client = make_client(transport, update_callback=collect)
+    async with client:
+        transport.notify(BUTTON_EVENTS_CHARACTERISTIC_UUID, b"\x02\x00")
+        await drain(client)
+
+    assert actions == [ButtonAction.RELEASED]
+
+
+async def test_press_timers_stop_at_disconnect(transport: FakeTransport) -> None:
+    actions: list[ButtonAction] = []
+
+    async def collect(update: DotUpdate) -> None:
+        if update.button is not None:
+            actions.append(update.button.action)
+
+    client = make_client(transport, update_callback=collect, long_press_seconds=0.05)
+    await client.connect()
+    transport.notify(BUTTON_EVENTS_CHARACTERISTIC_UUID, b"\x01\x00")
+    await drain(client)
+    await client.disconnect()
+    await asyncio.sleep(0.1)
+
+    assert actions == [ButtonAction.PUSHED]
+
+
+def test_invalid_long_press_timing(transport: FakeTransport) -> None:
+    for value in (True, "1", float("nan"), 0, -1):
+        with pytest.raises(DotValidationError, match="long_press_seconds"):
+            FlitsmeisterDotClient(transport, long_press_seconds=value)  # type: ignore[arg-type]

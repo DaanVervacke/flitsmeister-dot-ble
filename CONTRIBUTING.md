@@ -22,6 +22,7 @@ The scripts under `scripts/` talk to a real DOT. Run them as modules:
 
 ```bash
 uv run python -m scripts.probe_dot
+uv run python -m scripts.drive_dot_client
 ```
 
 ## Running the checks
