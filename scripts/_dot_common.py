@@ -285,13 +285,17 @@ async def find_dot(scan: Scanner, address: str | None, seconds: float) -> BLEDev
 
 
 def state_record(state: DotState) -> dict[str, object]:
-    """Return the state as a JSON friendly dict."""
+    """Return the state as a JSON friendly dict with the serial redacted."""
     record: dict[str, object] = {}
     for field in fields(state):
         value = getattr(state, field.name)
         if isinstance(value, Enum):
             value = value.name
         record[field.name] = value
+    if record["serial_raw"] is not None:
+        record["serial_raw"] = FAKE_SERIAL.hex()
+    if record["serial_uuid"] is not None:
+        record["serial_uuid"] = "REDACTED"
     return record
 
 

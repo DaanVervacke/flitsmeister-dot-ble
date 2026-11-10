@@ -17,6 +17,9 @@ from flitsmeister_dot_ble import (
     FlitsmeisterDotClient,
     LedOrientation,
     MotionStatus,
+    SpeechLanguage,
+    Volume,
+    animations,
 )
 from flitsmeister_dot_ble.const import BUTTON_EVENTS_CHARACTERISTIC_UUID
 from flitsmeister_dot_ble.protocol import (
@@ -79,6 +82,58 @@ def test_led_orientation_maps_unknown_values_to_upside_down() -> None:
 def test_led_orientation_rejects_wrong_length() -> None:
     with pytest.raises(DotProtocolError, match="1 byte"):
         decode_led_orientation(b"")
+
+
+def test_drive_tour_writes_match_the_presets() -> None:
+    records = load_records("dot_drive_tour.jsonl")
+    writes = [
+        bytes.fromhex(str(record["hex"])) for record in records if record["dir"] == "tx"
+    ]
+
+    assert animations.startup().to_bytes() in writes
+    assert animations.speed_trap().to_bytes() in writes
+    assert animations.speed_cam().to_bytes() in writes
+    assert animations.traffic_camera().to_bytes() in writes
+    assert animations.avg_speed_check_start().to_bytes() in writes
+    assert animations.avg_speed_check_end().to_bytes() in writes
+    assert animations.traffic_jam_start().to_bytes() in writes
+    assert animations.traffic_jam_end().to_bytes() in writes
+    assert animations.police_hotspot().to_bytes() in writes
+    assert animations.roadworks().to_bytes() in writes
+    assert animations.ambulance().to_bytes() in writes
+    assert animations.fire_truck().to_bytes() in writes
+    assert animations.police().to_bytes() in writes
+    assert animations.emergency_vehicle().to_bytes() in writes
+    assert animations.railway_crossing().to_bytes() in writes
+    assert animations.wrong_way_driving().to_bytes() in writes
+    assert animations.wrong_way_driver().to_bytes() in writes
+    assert animations.reporting().to_bytes() in writes
+    assert animations.updating().to_bytes() in writes
+    assert (
+        animations.incident(speech=animations.DotSound.SPEECH_ACCIDENT).to_bytes()
+        in writes
+    )
+    assert (
+        animations.lane_closure(
+            speech=animations.DotSound.SPEECH_LANE_CLOSED
+        ).to_bytes()
+        in writes
+    )
+    assert (
+        animations.progress(
+            color=animations.DotColor.SPEED_TRAP, fraction=0.5
+        ).to_bytes()
+        in writes
+    )
+    assert animations.overspeed(fraction=0.75).to_bytes() in writes
+    assert animations.brightness_sample().to_bytes() in writes
+    assert animations.orientation_sample().to_bytes() in writes
+    assert animations.fade_out_without_cut_off().to_bytes() in writes
+    assert animations.fade_out().to_bytes() in writes
+    assert bytes((Volume.NORMAL,)) in writes
+    assert bytes((Brightness.BRIGHTNESS_10,)) in writes
+    assert bytes((LedOrientation.UPSIDE_DOWN,)) in writes
+    assert bytes((SpeechLanguage.DUTCH,)) in writes
 
 
 def test_dot_button_events_from_capture_decode() -> None:

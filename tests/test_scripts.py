@@ -8,6 +8,7 @@ import pytest
 from bleak.backends.device import BLEDevice
 from flitsmeister_dot_ble import (
     Brightness,
+    DotState,
     FlitsmeisterDotClient,
     LedOrientation,
     SpeechLanguage,
@@ -60,6 +61,22 @@ def test_redact_payload_keeps_other_characteristics() -> None:
     payload = b"\x64"
 
     assert common.redact_payload(BATTERY_LEVEL_CHARACTERISTIC_UUID, payload) == payload
+
+
+def test_state_record_redacts_the_serial() -> None:
+    state = DotState(
+        serial_raw="05eb6fdea54731d6",
+        serial_uuid="6EFFB6F5-0EA8-3C8E-9B8F-DB97D6B281F5",
+        volume=Volume.NORMAL,
+    )
+    record = common.state_record(state)
+
+    assert record["serial_raw"] == "0011223344556677"
+    assert record["serial_uuid"] == "REDACTED"
+    assert record["volume"] == "NORMAL"
+    empty = common.state_record(DotState())
+    assert empty["serial_raw"] is None
+    assert empty["serial_uuid"] is None
 
 
 def test_capture_writer_records_redacted_serial(tmp_path: Path) -> None:

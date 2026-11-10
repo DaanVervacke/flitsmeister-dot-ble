@@ -236,8 +236,12 @@ from a retail device.
 6. Write the startup animation
 
 A client that only subscribes and reads gets dropped by the device after
-about 4 seconds. The Flitsmeister app writes the volume and the startup
-animation immediately after connecting, which may be what holds the link.
+about 4 seconds. A tour that writes continuously held the link for over
+70 seconds, so the Flitsmeister app's writes, the volume and the startup
+animation right after connecting, are what hold the link. The device
+also notifies the battery level periodically while connected, and the
+brightness and LED orientation writes were confirmed on hardware with
+their read back.
 
 ## Firmware update
 
