@@ -28,7 +28,7 @@ keywords = [
     "home-assistant",
 ]
 dependencies = [
-    "bleak>=1.1.1,<4",
+    "bleak>=3.0.0,<4",
     "bleak-retry-connector>=4.7.1,<5",
 ]
 
