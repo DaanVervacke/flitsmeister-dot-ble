@@ -12,6 +12,7 @@ Before 1.0, breaking changes ship as minor bumps.
 
 - Correct the alert cut off byte and documentation drift
 - Keep the session when the DOT refuses a read back
+- Read both settings and keep live validation going after a refused read
 
 ### Documentation
 
@@ -35,5 +36,6 @@ Before 1.0, breaking changes ship as minor bumps.
 - Share the proxy refusal mapping and test it against aioesphomeapi
 - Share the script connect loop and restore the Bluetooth manager
 - Split the live validation checks and name their constants
+- Test the script retry limit and the proxy shutdown
 
 
