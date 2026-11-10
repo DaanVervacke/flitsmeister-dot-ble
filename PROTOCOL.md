@@ -9,7 +9,9 @@ tree of that APK.
 
 - Nordic nRF54L15 (board `nrf54l15dk`), Zephyr 4.0.99, MCUboot, C++ application
 - 8 LEDs, 1 W speaker, two buttons (firmware calls them left and right), accelerometer
-- Advertises as `FM DOT`
+- Advertises as `FM DOT` with a random static Bluetooth address
+- A retail device reports model number `nrf54l15` and firmware and software
+  revision `2.9.0`, newer than the 1.0.14 bundled in the app
 - Firmware version string in 1.0.14: `1.0.14-HEAD+20260130.162802.f6db73e`
 
 ## GATT services and characteristics
@@ -42,8 +44,12 @@ The SMP characteristic UUID differs from stock Zephyr (`DA2E988E-F315-4E01-AE9E-
 
 - Advertised device name: `FM DOT`
 - Advertised service UUID: `27831530-33ee-9b9c-124d-109d6b0c0a91`
+- Manufacturer specific data with company ID 4012 (`0x0FAC`) and an empty
+  payload, purpose unknown
 - The app accepts the Dot for connection at RSSI above -85 dBm
 - Manufacturer specific data, company ID 871 (`0x0367`), identifies the other devices: bytes 1-2 equal `04 04` for FM One, `0C 28` for FM Two. The Dot is matched on name instead
+- The Dot sleeps while parked and advertises only in bursts after
+  accelerometer motion, so a scanner must keep scanning while it connects
 - The firmware also builds an iBeacon advertisement set. The app ignores it for the Dot, likely used for in-car presence detection
 
 ## Animation characteristic
@@ -212,7 +218,12 @@ After a brightness or rotation write the app reads the characteristic back and p
 | Battery level `0x2A19` | 1 byte, 0 to 100 percent |
 | Charging state `0x2BED` | 3 or more bytes, the app reads byte 2: 0 consuming, 1 charging, 2 charging done |
 | Motion `...1580` | 1 byte: 0 parked, any other value driving. Driven by the accelerometer, the device sleeps while parked and wakes on motion |
-| Serial number `0x2A25` | raw bytes. The app does not show them directly, it hashes them with `UUID.nameUUIDFromBytes` (MD5) and uppercases the result |
+| Serial number `0x2A25` | raw bytes, redacted in captures. The app hashes them with `UUID.nameUUIDFromBytes` (MD5) and uppercases the result |
+
+Observed on hardware: the charging state payload was `00 a3 02` while the
+battery was full on USB power. Bytes 0 and 1 are unknown, likely flags.
+The button event payloads in the table above are real indication payloads
+from a retail device.
 
 ## Connection sequence
 
@@ -222,6 +233,10 @@ After a brightness or rotation write the app reads the characteristic back and p
 4. Write the volume stored in the app preferences
 5. Read battery level, charging state, manufacturer name, model number, serial number, firmware revision, software revision, motion
 6. Write the startup animation
+
+A client that only subscribes and reads gets dropped by the device after
+about 4 seconds. The Flitsmeister app writes the volume and the startup
+animation immediately after connecting, which may be what holds the link.
 
 ## Firmware update
 

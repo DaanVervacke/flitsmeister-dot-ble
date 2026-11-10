@@ -163,6 +163,9 @@ def proxy_host(value: str) -> str:
 Scanner = Callable[[float], Awaitable[list[Sighting]]]
 """Coroutine function that scans for at least the given seconds."""
 
+SCAN_WINDOW_SECONDS = 8.0
+CONNECT_ATTEMPTS = 3
+
 
 async def scan_local(seconds: float) -> list[Sighting]:
     """Scan with the local Bluetooth adapter."""
@@ -230,19 +233,50 @@ async def open_scanner(
             _LOGGER.debug("Stopping the Bluetooth manager failed", exc_info=True)
 
 
+@asynccontextmanager
+async def background_scanner(enabled: bool) -> AsyncIterator[None]:
+    """Keep a local scanner running, so BlueZ does not forget the device.
+
+    The DOT advertises in short bursts. A running scanner re-adds it to
+    BlueZ on every burst, which keeps the connect attempts of
+    bleak-retry-connector working. Disabled for proxy connections.
+    """
+    if not enabled:
+        yield
+        return
+    scanner = BleakScanner()
+    await scanner.start()
+    try:
+        yield
+    finally:
+        try:
+            await scanner.stop()
+        except Exception:
+            _LOGGER.debug("Stopping the background scanner failed", exc_info=True)
+
+
 async def find_dot(scan: Scanner, address: str | None, seconds: float) -> BLEDevice:
     """Return the device with ``address``, or the first DOT seen.
 
     With ``address`` set, any device with that address matches, DOT or
-    not. Without it, only a DOT advertisement matches.
+    not. Without it, only a DOT advertisement matches. The scan repeats
+    in windows until the deadline, so a device that advertises in
+    bursts is still found.
 
     Raises:
-        TimeoutError: No matching device was seen.
+        TimeoutError: No matching device was seen before the deadline.
     """
-    for sighting in await scan(seconds):
-        if address is not None:
-            if sighting.device.address.upper() == address.upper():
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + seconds
+    while True:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            break
+        sightings = await scan(min(remaining, SCAN_WINDOW_SECONDS))
+        for sighting in sightings:
+            if address is not None:
+                if sighting.device.address.upper() == address.upper():
+                    return sighting.device
+            elif sighting.is_dot:
                 return sighting.device
-        elif sighting.is_dot:
-            return sighting.device
     raise TimeoutError("Flitsmeister DOT was not found")

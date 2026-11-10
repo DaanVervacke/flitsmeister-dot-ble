@@ -112,7 +112,69 @@ async def test_find_dot() -> None:
     found = await common.find_dot(scan, "11:11:11:11:11:11", 1)
     assert found.address == "11:11:11:11:11:11"
     with pytest.raises(TimeoutError):
-        await common.find_dot(scan, "33:33:33:33:33:33", 1)
+        await common.find_dot(scan, "33:33:33:33:33:33", 0.05)
+
+
+async def test_find_dot_scans_in_windows_until_seen() -> None:
+    calls: list[float] = []
+
+    async def scan(seconds: float) -> list[common.Sighting]:
+        calls.append(seconds)
+        if len(calls) == 1:
+            return []
+        return [_sighting("22:22:22:22:22:22", "FM DOT")]
+
+    found = await common.find_dot(scan, None, 60)
+    assert found.address == "22:22:22:22:22:22"
+    assert len(calls) == 2
+    assert calls[0] <= common.SCAN_WINDOW_SECONDS
+
+
+class FakeScanner:
+    def __init__(self) -> None:
+        self.starts = 0
+        self.stops = 0
+        self.fail_stop = False
+
+    async def start(self) -> None:
+        self.starts += 1
+
+    async def stop(self) -> None:
+        self.stops += 1
+        if self.fail_stop:
+            raise OSError("stop failed")
+
+
+async def test_background_scanner_disabled_is_a_no_op(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("scanner must not be created")
+
+    monkeypatch.setattr(common, "BleakScanner", fail)
+    async with common.background_scanner(False):
+        pass
+
+
+async def test_background_scanner_starts_and_stops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scanner = FakeScanner()
+    monkeypatch.setattr(common, "BleakScanner", lambda: scanner)
+    async with common.background_scanner(True):
+        assert scanner.starts == 1
+    assert scanner.stops == 1
+
+
+async def test_background_scanner_survives_stop_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scanner = FakeScanner()
+    scanner.fail_stop = True
+    monkeypatch.setattr(common, "BleakScanner", lambda: scanner)
+    async with common.background_scanner(True):
+        pass
+    assert scanner.stops == 1
 
 
 async def test_local_scanner_is_yielded_without_proxy() -> None:
@@ -175,6 +237,7 @@ async def test_probe_capture_records_traffic(
         return transport
 
     monkeypatch.setattr(common, "open_scanner", scanner)
+    monkeypatch.setattr(common, "BleakScanner", FakeScanner)
     monkeypatch.setattr(probe_dot, "BleakTransport", bleak_transport)
     output = tmp_path / "capture.jsonl"
     config = probe_dot.config_from_args(
@@ -192,6 +255,42 @@ async def test_probe_capture_records_traffic(
         if record["chr"] == SERIAL_NUMBER_CHARACTERISTIC_UUID
     ]
     assert serial_records[0]["hex"] == "001122"
+
+
+async def test_probe_capture_retries_after_connect_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    transports: list[FakeTransport] = []
+
+    @asynccontextmanager
+    async def scanner(
+        _proxy: str | None, _noise_psk: str | None
+    ) -> AsyncIterator[common.Scanner]:
+        async def scan(_seconds: float) -> list[common.Sighting]:
+            return [_sighting("22:22:22:22:22:22", "FM DOT")]
+
+        yield scan
+
+    def bleak_transport(_device: BLEDevice) -> FakeTransport:
+        transport = FakeTransport()
+        if not transports:
+            transport.fail_connect = OSError("device gone")
+        transports.append(transport)
+        return transport
+
+    monkeypatch.setattr(common, "open_scanner", scanner)
+    monkeypatch.setattr(common, "BleakScanner", FakeScanner)
+    monkeypatch.setattr(probe_dot, "BleakTransport", bleak_transport)
+    with caplog.at_level("WARNING"):
+        await probe_dot.capture(
+            probe_dot.config_from_args(
+                ["--capture-seconds", "0", "--output", str(tmp_path / "c.jsonl")]
+            )
+        )
+    assert len(transports) == 2
+    assert transports[0].connect_calls == 1
+    assert transports[1].connect_calls == 1
+    assert "Connect attempt 1 failed" in caplog.text
 
 
 def test_is_dot_advertisement_reaches_the_package() -> None:

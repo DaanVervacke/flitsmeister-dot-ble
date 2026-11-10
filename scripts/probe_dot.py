@@ -9,7 +9,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from flitsmeister_dot_ble import BleakTransport, FlitsmeisterDotClient, __version__
+from flitsmeister_dot_ble import (
+    BleakTransport,
+    DotConnectionError,
+    FlitsmeisterDotClient,
+    __version__,
+)
 
 from scripts import _dot_common as common
 
@@ -50,20 +55,38 @@ async def list_advertisements(config: ProbeConfig) -> None:
 
 
 async def capture(config: ProbeConfig) -> None:
-    """Connect read-only and log every payload for the capture window."""
+    """Connect read-only and log every payload for the capture window.
+
+    Retries the scan and connect cycle, because the DOT sleeps its
+    advertising off between motion events.
+    """
     with common.CaptureWriter(config.output) as writer:
         async with common.open_scanner(config.proxy, config.noise_psk) as scan:
-            device = await common.find_dot(scan, config.address, config.scan_seconds)
-            transport = common.CaptureTransport(BleakTransport(device), writer)
-            async with FlitsmeisterDotClient(transport) as client:
-                _LOGGER.info(
-                    "Connected manufacturer=%s model=%s firmware=%s software=%s",
-                    client.state.manufacturer_name,
-                    client.state.model_number,
-                    client.state.firmware_revision,
-                    client.state.software_revision,
+            for attempt in range(1, common.CONNECT_ATTEMPTS + 1):
+                device = await common.find_dot(
+                    scan, config.address, config.scan_seconds
                 )
-                await asyncio.sleep(config.capture_seconds)
+                try:
+                    async with common.background_scanner(config.proxy is None):
+                        transport = common.CaptureTransport(
+                            BleakTransport(device), writer
+                        )
+                        async with FlitsmeisterDotClient(transport) as client:
+                            _LOGGER.info(
+                                "Connected manufacturer=%s model=%s firmware=%s"
+                                " software=%s",
+                                client.state.manufacturer_name,
+                                client.state.model_number,
+                                client.state.firmware_revision,
+                                client.state.software_revision,
+                            )
+                            await asyncio.sleep(config.capture_seconds)
+                except DotConnectionError:
+                    if attempt == common.CONNECT_ATTEMPTS:
+                        raise
+                    _LOGGER.warning("Connect attempt %d failed, rescanning", attempt)
+                else:
+                    return
 
 
 def _parser() -> argparse.ArgumentParser:
