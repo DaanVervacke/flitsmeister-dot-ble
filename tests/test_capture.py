@@ -1,7 +1,8 @@
 """Replay the live capture fixtures through the client and the decoders.
 
-The fixtures hold real DOT traffic recorded by ``scripts/probe_dot.py``,
-with the serial number replaced by the probe's fixed fake value.
+The fixtures hold real DOT traffic recorded by ``scripts/probe_dot.py``
+and ``scripts/live_validate.py``, with the serial number replaced by a
+fixed fake value.
 """
 
 import json
@@ -22,13 +23,20 @@ from flitsmeister_dot_ble import (
     animations,
 )
 from flitsmeister_dot_ble.const import (
+    ANIMATION_CHARACTERISTIC_UUID,
+    BATTERY_CHARGING_CHARACTERISTIC_UUID,
+    BATTERY_LEVEL_CHARACTERISTIC_UUID,
     BUTTON_EVENTS_CHARACTERISTIC_UUID,
+    MOTION_CHARACTERISTIC_UUID,
     SPEECH_LANGUAGE_CHARACTERISTIC_UUID,
 )
 from flitsmeister_dot_ble.protocol import (
+    decode_battery_level,
     decode_brightness,
     decode_button_event,
+    decode_charging_state,
     decode_led_orientation,
+    decode_motion_status,
     decode_speech,
 )
 
@@ -173,3 +181,91 @@ def test_dot_button_events_from_capture_decode() -> None:
         (DotButton.BLUE, ButtonAction.PUSHED),
         (DotButton.RED, ButtonAction.PUSHED),
     ]
+
+
+RX_DECODERS = {
+    BATTERY_LEVEL_CHARACTERISTIC_UUID: decode_battery_level,
+    BATTERY_CHARGING_CHARACTERISTIC_UUID: decode_charging_state,
+    MOTION_CHARACTERISTIC_UUID: decode_motion_status,
+    BUTTON_EVENTS_CHARACTERISTIC_UUID: decode_button_event,
+}
+
+
+def first_reads(records: list[dict[str, object]]) -> dict[str, bytes]:
+    reads: dict[str, bytes] = {}
+    for record in records:
+        if record["dir"] == "read":
+            reads.setdefault(str(record["chr"]), bytes.fromhex(str(record["hex"])))
+    return reads
+
+
+@pytest.mark.parametrize("name", ["dot_live_validation.jsonl", "dot_live_rerun.jsonl"])
+def test_live_run_notifications_all_decode(name: str) -> None:
+    records = load_records(name)
+    received = [record for record in records if record["dir"] == "rx"]
+
+    for record in received:
+        RX_DECODERS[str(record["chr"])](bytes.fromhex(str(record["hex"])))
+
+    assert {str(record["chr"]) for record in received} == set(RX_DECODERS)
+
+
+async def test_live_rerun_connect_replays_through_the_client() -> None:
+    transport = FakeTransport(reads=first_reads(load_records("dot_live_rerun.jsonl")))
+
+    async with FlitsmeisterDotClient(transport) as client:
+        state = client.state
+        assert state.model_number == "nrf54l15"
+        assert state.firmware_revision == "2.9.0"
+        assert state.charging_state is ChargingState.CONSUMING
+        assert state.speech_language is SpeechLanguage.DUTCH
+        assert state.speech_voice_raw == 1
+        await client.read_settings()
+        assert client.state.brightness is Brightness.BRIGHTNESS_100
+        assert client.state.led_orientation is LedOrientation.NORMAL
+
+
+def test_live_run_writes_match_the_library() -> None:
+    records = load_records("dot_live_validation.jsonl")
+    animation_writes = {
+        bytes.fromhex(str(record["hex"]))
+        for record in records
+        if record["dir"] == "tx" and record["chr"] == ANIMATION_CHARACTERISTIC_UUID
+    }
+
+    for builder in (
+        animations.speed_trap,
+        animations.speed_cam,
+        animations.traffic_camera,
+        animations.avg_speed_check_start,
+        animations.police_hotspot,
+        animations.roadworks,
+    ):
+        assert builder(rateable=True).to_bytes() in animation_writes
+        assert builder(rateable=False).to_bytes() in animation_writes
+    for color in animations.DotColor:
+        for fraction in (0.0, 0.25, 0.5, 0.75, 1.0):
+            progress = animations.progress(color=color, fraction=fraction)
+            assert progress.to_bytes() in animation_writes
+    assert (
+        animations.progress(color=animations.DotColor.SUCCESS, fraction=1.5).to_bytes()
+        in animation_writes
+    )
+
+
+def test_live_run_shows_the_refused_language_write() -> None:
+    records = load_records("dot_live_validation.jsonl")
+    language_writes = [
+        record
+        for record in records
+        if record["dir"] == "tx"
+        and record["chr"] == SPEECH_LANGUAGE_CHARACTERISTIC_UUID
+    ]
+    rerun = load_records("dot_live_rerun.jsonl")
+
+    assert language_writes
+    assert all(
+        record["chr"] != SPEECH_LANGUAGE_CHARACTERISTIC_UUID
+        for record in rerun
+        if record["dir"] == "tx"
+    )
