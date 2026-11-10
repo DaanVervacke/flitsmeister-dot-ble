@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from flitsmeister_dot_ble import (
-    BleakTransport,
     DotConnectionError,
     FlitsmeisterDotClient,
     __version__,
@@ -69,7 +68,7 @@ async def capture(config: ProbeConfig) -> None:
                 try:
                     async with common.background_scanner(config.proxy is None):
                         transport = common.CaptureTransport(
-                            BleakTransport(device), writer
+                            common.make_transport(device, config.proxy), writer
                         )
                         async with FlitsmeisterDotClient(transport) as client:
                             _LOGGER.info(

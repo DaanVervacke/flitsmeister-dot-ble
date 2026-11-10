@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import habluetooth
 import pytest
 from bleak.backends.device import BLEDevice
 from flitsmeister_dot_ble import (
@@ -265,7 +266,7 @@ async def test_probe_capture_records_traffic(
 
     monkeypatch.setattr(common, "open_scanner", scanner)
     monkeypatch.setattr(common, "BleakScanner", FakeScanner)
-    monkeypatch.setattr(probe_dot, "BleakTransport", bleak_transport)
+    monkeypatch.setattr(common, "BleakTransport", bleak_transport)
     output = tmp_path / "capture.jsonl"
     config = probe_dot.config_from_args(
         ["--capture-seconds", "0", "--output", str(output)]
@@ -307,7 +308,7 @@ async def test_probe_capture_retries_after_connect_failure(
 
     monkeypatch.setattr(common, "open_scanner", scanner)
     monkeypatch.setattr(common, "BleakScanner", FakeScanner)
-    monkeypatch.setattr(probe_dot, "BleakTransport", bleak_transport)
+    monkeypatch.setattr(common, "BleakTransport", bleak_transport)
     with caplog.at_level("WARNING"):
         await probe_dot.capture(
             probe_dot.config_from_args(
@@ -430,3 +431,11 @@ def test_drive_main_reports_failure(
     assert drive_dot_client.main(["--config", str(tmp_path / "none.json")]) == 1
     assert "no adapter" in caplog.text
     assert any(record.exc_info for record in caplog.records)
+
+
+def test_make_transport_uses_the_habluetooth_wrapper_for_a_proxy() -> None:
+    device = BLEDevice("AA:BB:CC:DD:EE:FF", "FM DOT", {})
+    local = common.make_transport(device, None)
+    proxied = common.make_transport(device, "10.0.0.2")
+    assert local._client_class is not habluetooth.HaBleakClientWrapper
+    assert proxied._client_class is habluetooth.HaBleakClientWrapper

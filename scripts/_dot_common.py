@@ -18,6 +18,7 @@ from bleak import BleakScanner
 from bleak.backends.device import BLEDevice
 from bleak_esphome import APIConnectionManager, ESPHomeDeviceConfig
 from flitsmeister_dot_ble import (
+    BleakTransport,
     BleTransport,
     DisconnectedCallback,
     DotState,
@@ -219,6 +220,7 @@ async def open_scanner(
     bluetooth_manager = DiscoveryBluetoothManager()
     try:
         await bluetooth_manager.async_setup()
+        habluetooth.set_manager(bluetooth_manager)
         await manager.start()
         for scanner in bluetooth_manager.async_current_scanners():
             if getattr(scanner, "connectable", False):
@@ -233,6 +235,17 @@ async def open_scanner(
             bluetooth_manager.async_stop()
         except Exception:
             _LOGGER.debug("Stopping the Bluetooth manager failed", exc_info=True)
+
+
+def make_transport(device: BLEDevice, proxy: str | None) -> BleakTransport:
+    """Return the transport for a device found locally or through a proxy.
+
+    A proxy device only connects through the habluetooth client wrapper,
+    because the plain Bleak client would try the local adapter.
+    """
+    if proxy is None:
+        return BleakTransport(device)
+    return BleakTransport(device, client_factory=habluetooth.HaBleakClientWrapper)
 
 
 @asynccontextmanager
