@@ -9,6 +9,7 @@ import pytest
 from bleak.backends.device import BLEDevice
 from flitsmeister_dot_ble import (
     Brightness,
+    DotConnectionError,
     DotState,
     FlitsmeisterDotClient,
     LedOrientation,
@@ -243,14 +244,21 @@ async def test_proxy_scanner_restores_the_previous_bluetooth_manager(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     previous = object()
+    connections: list[FakeApiConnection] = []
+
+    def api_connection(config: object) -> FakeApiConnection:
+        connections.append(FakeApiConnection(config))
+        return connections[-1]
+
     monkeypatch.setattr(CentralBluetoothManager, "manager", previous)
-    monkeypatch.setattr(common, "APIConnectionManager", FakeApiConnection)
+    monkeypatch.setattr(common, "APIConnectionManager", api_connection)
     monkeypatch.setattr(common, "DiscoveryBluetoothManager", FakeBluetoothManager)
 
     async with common.open_scanner("proxy.local", None):
         assert isinstance(current_manager(), FakeBluetoothManager)
 
     assert current_manager() is previous
+    assert [connection.stopped for connection in connections] == [True]
 
 
 def current_manager() -> object:
@@ -366,6 +374,34 @@ async def test_probe_capture_retries_after_connect_failure(
     assert transports[0].connect_calls == 1
     assert transports[1].connect_calls == 1
     assert "Connect attempt 1 failed" in caplog.text
+
+
+async def test_probe_capture_gives_up_after_every_attempt_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transports: list[FakeTransport] = []
+
+    @asynccontextmanager
+    async def scanner(
+        _proxy: str | None, _noise_psk: str | None
+    ) -> AsyncIterator[common.Scanner]:
+        async def scan(_seconds: float) -> list[common.Sighting]:
+            return [_sighting("22:22:22:22:22:22", "FM DOT")]
+
+        yield scan
+
+    def bleak_transport(_device: BLEDevice) -> FakeTransport:
+        transport = FakeTransport()
+        transport.fail_connect = OSError("device gone")
+        transports.append(transport)
+        return transport
+
+    monkeypatch.setattr(common, "open_scanner", scanner)
+    monkeypatch.setattr(common, "BleakScanner", FakeScanner)
+    monkeypatch.setattr(common, "BleakTransport", bleak_transport)
+    with pytest.raises(DotConnectionError):
+        await probe_dot.capture(probe_dot.config_from_args(["--capture-seconds", "0"]))
+    assert len(transports) == common.CONNECT_ATTEMPTS
 
 
 def test_is_dot_advertisement_reaches_the_package() -> None:
