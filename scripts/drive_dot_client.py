@@ -92,12 +92,26 @@ async def tour(client: FlitsmeisterDotClient, pause_seconds: float) -> None:
     for preset in presets:
         await client.play_animation(preset)
         await asyncio.sleep(pause_seconds)
+    await client.play_animation(
+        animations.incident(speech=animations.DotSound.SPEECH_ACCIDENT)
+    )
+    await asyncio.sleep(pause_seconds)
+    await client.play_animation(
+        animations.lane_closure(speech=animations.DotSound.SPEECH_LANE_CLOSED)
+    )
+    await asyncio.sleep(pause_seconds)
     for fraction in (0.25, 0.5, 0.75):
         await client.play_animation(
             animations.progress(color=DotColor.SPEED_TRAP, fraction=fraction)
         )
         await asyncio.sleep(max(pause_seconds, 0.2))
     await client.play_animation(animations.overspeed(fraction=0.75))
+    await asyncio.sleep(pause_seconds)
+    await client.play_animation(animations.brightness_sample())
+    await asyncio.sleep(max(pause_seconds, 0.2))
+    await client.play_animation(animations.orientation_sample())
+    await asyncio.sleep(max(pause_seconds, 0.2))
+    await client.play_animation(animations.fade_out_without_cut_off())
     await asyncio.sleep(pause_seconds)
     await client.play_animation(animations.fade_out())
     for volume in (Volume.SILENT, Volume.LOW, Volume.NORMAL, Volume.HARD):
@@ -170,7 +184,7 @@ def config_from_args(argv: Sequence[str] | None = None) -> RunConfig:
 
     Raises:
         SystemExit: ``--controls`` was given without a config file, or
-            the config file is not a JSON object.
+            the config file is not valid JSON or not a JSON object.
     """
     args = _parser().parse_args(argv)
     try:

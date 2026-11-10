@@ -8,6 +8,7 @@ return the packets the Flitsmeister app sends for each situation,
 
 from dataclasses import dataclass
 from enum import IntEnum
+from math import floor
 
 from .exceptions import DotValidationError
 
@@ -209,8 +210,11 @@ class DotAnimation:
 
 
 def _led_count(fraction: float) -> int:
-    """Scale a fraction to a LED count clamped between 1 and 8."""
-    return min(8, max(1, round(fraction * 8)))
+    """Scale a fraction to a LED count clamped between 1 and 8.
+
+    The Flitsmeister app rounds halves up, like ``Math.round`` in Java.
+    """
+    return min(8, max(1, floor(fraction * 8 + 0.5)))
 
 
 def startup() -> DotAnimation:
@@ -259,6 +263,7 @@ def speed_trap(*, rateable: bool = True) -> DotAnimation:
         primary_sound=DotSound.SFX_SPEED_CAMERA,
         secondary_sound=DotSound.SPEECH_SPEED_TRAP,
         end=DotEnd.RATE if rateable else None,
+        cut_off=True,
     )
 
 
@@ -279,6 +284,7 @@ def speed_cam(*, rateable: bool = True) -> DotAnimation:
         primary_sound=DotSound.SFX_SPEED_CAMERA,
         secondary_sound=DotSound.SPEECH_SPEED_CAM,
         end=DotEnd.RATE if rateable else None,
+        cut_off=True,
     )
 
 
@@ -297,6 +303,7 @@ def traffic_camera(*, rateable: bool = True) -> DotAnimation:
         value=3,
         primary_sound=DotSound.SPEECH_TRAFFIC_CAMERA,
         end=DotEnd.RATE if rateable else None,
+        cut_off=True,
     )
 
 
@@ -317,6 +324,7 @@ def avg_speed_check_start(*, rateable: bool = True) -> DotAnimation:
         primary_sound=DotSound.SFX_AVG_SPEED_CHECK_START,
         secondary_sound=DotSound.SPEECH_AVG_SPEED_CHECK,
         end=DotEnd.RATE if rateable else None,
+        cut_off=True,
     )
 
 
@@ -387,6 +395,7 @@ def police_hotspot(*, rateable: bool = True) -> DotAnimation:
         primary_sound=DotSound.SFX_POLICE_HOTSPOT,
         secondary_sound=DotSound.SPEECH_HOTSPOT,
         end=DotEnd.RATE if rateable else None,
+        cut_off=True,
     )
 
 
@@ -407,6 +416,7 @@ def roadworks(*, rateable: bool = True) -> DotAnimation:
         primary_sound=DotSound.SFX_SAFETY_NOTIFICATION_2,
         secondary_sound=DotSound.SPEECH_ROADWORKS,
         end=DotEnd.RATE if rateable else None,
+        cut_off=True,
     )
 
 
@@ -429,6 +439,7 @@ def incident(*, speech: DotSound, rateable: bool = True) -> DotAnimation:
         primary_sound=DotSound.SFX_SAFETY_NOTIFICATION_2,
         secondary_sound=speech,
         end=DotEnd.RATE if rateable else None,
+        cut_off=True,
     )
 
 
@@ -450,6 +461,7 @@ def lane_closure(*, speech: DotSound) -> DotAnimation:
         primary_sound=DotSound.SFX_SAFETY_NOTIFICATION_2,
         secondary_sound=speech,
         end=DotEnd.FADE_OUT,
+        cut_off=True,
     )
 
 
@@ -603,6 +615,7 @@ def overspeed(*, fraction: float) -> DotAnimation:
         color=DotColor.DANGER,
         value=_led_count(fraction),
         primary_sound=DotSound.SFX_REDUCE_SPEED,
+        cut_off=True,
     )
 
 

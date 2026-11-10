@@ -17,6 +17,8 @@ from functools import partial
 from types import TracebackType
 from typing import Final, Self, TypeAlias
 
+from bleak.exc import BleakError
+
 from .animations import DotAnimation, DotAnimationType
 from .const import (
     ANIMATION_CHARACTERISTIC_UUID,
@@ -79,8 +81,10 @@ __all__ = [
 UpdateCallback: TypeAlias = Callable[[DotUpdate], Awaitable[None] | None]  # noqa: UP040
 """Sync or async function called with each ``DotUpdate``.
 
-It runs in the notification worker, or in the connecting task for the
-values read during ``connect()``. It must return quickly.
+It runs in the notification worker, in the connecting task for the
+values read during ``connect()``, in the calling task of a settings
+method for its read back, or in the long press timer for a
+``LONG_PRESS`` event. It must return quickly.
 """
 ConnectionLostCallback: TypeAlias = Callable[[Exception], Awaitable[None] | None]  # noqa: UP040
 """Sync or async function called with the exception that ended a session."""
@@ -118,7 +122,7 @@ _PHASE_STATUS: Final[Mapping[_Phase, ConnectionStatus]] = {
 }
 _LIVE_PHASES = frozenset((_Phase.CONNECTED, _Phase.READY))
 
-_TRANSPORT_ERRORS = (OSError, TimeoutError)
+_TRANSPORT_ERRORS = (OSError, BleakError, TimeoutError)
 
 
 @dataclass(slots=True)
@@ -301,6 +305,7 @@ class FlitsmeisterDotClient:
             DotConnectionError: The transport failed, the link dropped
                 while connecting, or ``disconnect()`` cancelled the
                 attempt. Transport errors are chained as ``__cause__``.
+                A slow update callback also trips this timeout.
             DotTimeoutError: A subscribe or a read did not finish within
                 ``response_timeout_seconds``.
             DotProtocolError: A read returned a malformed payload.
@@ -366,6 +371,7 @@ class FlitsmeisterDotClient:
                 failed. Transport errors are chained as ``__cause__``.
             DotValidationError: The animation does not fit the packet.
         """
+        self._require_ready()
         if self._is_duplicate(animation):
             return
         await self._send(
@@ -376,8 +382,8 @@ class FlitsmeisterDotClient:
     async def set_volume(self, volume: Volume) -> None:
         """Set the speaker volume.
 
-        The device does not report the volume, so the state mirrors the
-        written value.
+        The Flitsmeister app never reads the volume back, so the state
+        mirrors the written value.
 
         Raises:
             DotNotReadyError: The session is not ready.
@@ -392,9 +398,9 @@ class FlitsmeisterDotClient:
 
         Raises:
             DotNotReadyError: The session is not ready.
-            DotConnectionError: The session failed earlier, the write or
-                the read back failed, or the device returned a malformed
-                value.
+            DotConnectionError: The session failed earlier or the write
+                or the read back failed.
+            DotProtocolError: The read back returned a malformed value.
         """
         await self._send(
             BRIGHTNESS_CHARACTERISTIC_UUID, bytes((brightness,)), "brightness"
@@ -406,9 +412,9 @@ class FlitsmeisterDotClient:
 
         Raises:
             DotNotReadyError: The session is not ready.
-            DotConnectionError: The session failed earlier, the write or
-                the read back failed, or the device returned a malformed
-                value.
+            DotConnectionError: The session failed earlier or the write
+                or the read back failed.
+            DotProtocolError: The read back returned a malformed value.
         """
         await self._send(
             LED_ROTATION_CHARACTERISTIC_UUID, bytes((orientation,)), "orientation"
@@ -418,8 +424,8 @@ class FlitsmeisterDotClient:
     async def set_speech_language(self, language: SpeechLanguage) -> None:
         """Set the voice language.
 
-        The device does not report the language, so the state mirrors
-        the written value.
+        The Flitsmeister app never reads the language back, so the
+        state mirrors the written value.
 
         Raises:
             DotNotReadyError: The session is not ready.
@@ -440,8 +446,9 @@ class FlitsmeisterDotClient:
 
         Raises:
             DotNotReadyError: The session is not ready.
-            DotConnectionError: The session failed earlier, a read
-                failed, or the device returned a malformed value.
+            DotConnectionError: The session failed earlier or a read
+                failed.
+            DotProtocolError: A read returned a malformed value.
         """
         await self._read_and_apply(BRIGHTNESS_CHARACTERISTIC_UUID)
         await self._read_and_apply(LED_ROTATION_CHARACTERISTIC_UUID)
@@ -555,6 +562,9 @@ class FlitsmeisterDotClient:
 
     async def _resolve_press(self, event: DotButtonEvent, payload: bytes) -> None:
         if event.action is ButtonAction.PUSHED:
+            previous = self._presses.get(event.button)
+            if previous is not None:
+                previous.timer.cancel()
             self._presses[event.button] = _ButtonPress(
                 payload=payload,
                 timer=asyncio.get_running_loop().create_task(
@@ -628,7 +638,7 @@ class FlitsmeisterDotClient:
         except _TRANSPORT_ERRORS as err:
             failure = DotConnectionError(f"Writing {label} to the DOT failed")
             self._fail(failure)
-            raise DotConnectionError(f"Writing {label} to the DOT failed") from err
+            raise failure from err
 
     async def _read_and_apply(self, characteristic: str) -> None:
         self._require_ready()
@@ -638,7 +648,7 @@ class FlitsmeisterDotClient:
         except _TRANSPORT_ERRORS as err:
             failure = DotConnectionError("Reading the DOT failed")
             self._fail(failure)
-            raise DotConnectionError("Reading the DOT failed") from err
+            raise failure from err
         await self._apply(characteristic, payload)
 
     def _decode(

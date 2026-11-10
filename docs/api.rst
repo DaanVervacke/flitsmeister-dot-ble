@@ -1,7 +1,8 @@
 API reference
 =============
 
-Import every name on this page from ``flitsmeister_dot_ble``.
+Import every name on this page from ``flitsmeister_dot_ble``, the
+preset functions from ``flitsmeister_dot_ble.animations``.
 
 Client
 ------

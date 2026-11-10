@@ -51,11 +51,11 @@ class DotButton(StrEnum):
 class ButtonAction(IntEnum):
     """What happened to a button.
 
-    ``PUSHED`` and ``RELEASED`` come straight from the wire and are the
-    only actions the client emits today. A later milestone resolves
-    ``SHORT_PRESS`` and ``LONG_PRESS`` from the hold time, the
-    Flitsmeister app holds a button for a full second before it sends a
-    report.
+    ``PUSHED`` and ``RELEASED`` come straight from the wire. The client
+    resolves ``SHORT_PRESS`` and ``LONG_PRESS`` from the hold time, a
+    release before ``long_press_seconds`` is a short press and holding
+    past it is a long press, like the Flitsmeister app, which sends its
+    report after a full second.
     """
 
     PUSHED = 1
@@ -143,10 +143,11 @@ class DotState:
 
     Every field is None until the device reported it. ``serial_raw``
     holds the hex bytes of the serial number read, ``serial_uuid`` the
-    uppercase UUID string the Flitsmeister app derives from them. The
-    four settings mirror the last written value, brightness and LED
-    orientation are read back from the device, volume and speech
-    language are tracked locally after a write.
+    uppercase UUID string the Flitsmeister app derives from them.
+    Volume and speech language mirror the last written value, the
+    Flitsmeister app never reads them back. Brightness and LED
+    orientation reflect the value read back from the device after a
+    write or after ``read_settings``.
     """
 
     battery_level: int | None = None

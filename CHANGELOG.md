@@ -11,7 +11,5 @@ Before 1.0, breaking changes ship as minor bumps.
 ### Features
 
 - Add the DOT client with connect, subscribe, reads and state updates
-- Add animation writes with the full preset catalog of the Flitsmeister app
-- Add volume, brightness, LED orientation and speech language settings
-- Add short and long press resolution for the button events
-- Add the drive script that plays every preset against a real DOT
+- Validate the protocol against a live DOT capture
+- Add animation presets, settings writes and press resolution

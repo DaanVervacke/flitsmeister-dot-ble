@@ -50,11 +50,12 @@ A transport failure during ``connect()`` raises
 Every decoded value updates ``client.state`` and is passed to the
 optional ``update_callback`` as a :class:`~flitsmeister_dot_ble.DotUpdate`.
 Button pushes and releases arrive as
-:class:`~flitsmeister_dot_ble.DotButtonEvent` values on the update.
+:class:`~flitsmeister_dot_ble.DotButtonEvent` values on the update,
+with resolved short and long presses.
 
-The keyword-only option ``response_timeout_seconds`` limits every
-transport call after the transport connect. The :doc:`api` lists its
-default. An invalid timing raises
+The keyword-only options ``response_timeout_seconds`` and
+``long_press_seconds`` tune the timing. The :doc:`api` lists their
+defaults. An invalid timing raises
 :class:`~flitsmeister_dot_ble.DotValidationError`.
 
 Connection loss

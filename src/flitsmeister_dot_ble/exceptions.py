@@ -42,8 +42,4 @@ class DotValidationError(DotError, ValueError):
 
 
 class DotNotReadyError(DotError):
-    """The session is not ``READY``.
-
-    Reserved for the write methods of a later milestone, which raise it
-    before the session is ready.
-    """
+    """A write or read method ran before the session is ``READY``."""

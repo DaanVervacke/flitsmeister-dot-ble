@@ -74,9 +74,9 @@ An invalid timing raises `DotValidationError`.
 motion status and the device information. The serial number is kept both
 as the raw hex bytes and as the UUID string the Flitsmeister app shows.
 Both derive from the same read, the app hashes the raw bytes with MD5
-into a version 3 UUID. The four settings mirror the last written value,
-brightness and LED orientation are read back from the device, volume and
-speech language are tracked locally after a write.
+into a version 3 UUID. Volume and speech language mirror the last
+written value, brightness and LED orientation are read back from the
+device after a write or after `read_settings`.
 
 ## Animations
 
@@ -88,18 +88,21 @@ animation the Flitsmeister app ships is there:
 from flitsmeister_dot_ble import animations
 
 await client.play_animation(animations.speed_trap())
-await client.play_animation(animations.progress(animations.DotColor.DANGER, 0.5))
+await client.play_animation(
+    animations.progress(color=animations.DotColor.DANGER, fraction=0.5)
+)
 ```
 
-The presets cover the alert catalog, speed trap, speed camera, average
-speed check, traffic jam, police hotspot, roadworks, incidents, lane
-closures, the emergency vehicles, railway crossings, both wrong way
-alerts, approach progress, overspeed, the reporting hold, startup,
-updating and both fade outs. `rateable=True`, the default, lets a
+The presets cover the alert catalog, speed trap, speed camera,
+traffic camera, average speed check, traffic jam, police hotspot,
+roadworks, incidents, lane closures, the emergency vehicles, railway
+crossings, both wrong way alerts, approach progress, overspeed, the
+reporting hold, startup, updating, the brightness and orientation
+samples and both fade outs. `rateable=True`, the default, lets a
 button press rate the alert on the device, like the app does. The
 `DotAnimation` dataclass also builds custom packets: the type, color,
-LED count, both sounds and the end behavior are all fields, and
-`to_bytes` validates and encodes them.
+LED count, both sounds, the end behavior and the cut off flag are all
+fields, and `to_bytes` validates and encodes them.
 
 A progression top to bottom animation that equals the last one played
 is skipped, so repeated progress updates do not spam the device.
@@ -116,8 +119,10 @@ is skipped, so repeated progress updates do not spam the device.
 Brightness and LED orientation are read back into the state after the
 write. `read_settings` reads both without writing, the Flitsmeister app
 reads them only after a write, so `connect()` leaves them unset. Every
-method raises `DotNotReadyError` before the session is ready and
-`DotConnectionError` after a failed session or a failed write.
+method raises `DotNotReadyError` before the session is ready,
+`DotConnectionError` after a failed session or a failed transfer, and
+the read back methods also raise `DotProtocolError` when the device
+returns a malformed value.
 
 ## Buttons
 
@@ -202,8 +207,7 @@ the code style rules.
 
 All custom characteristics live under the service
 `27831530-33ee-9b9c-124d-109d6b0c0a91`. `PROTOCOL.md` holds the full
-wire format, including the animation packets that land in the library
-next.
+wire format, including the animation packets the library plays.
 
 ## Roadmap
 

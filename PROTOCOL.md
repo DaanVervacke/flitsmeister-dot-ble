@@ -1,9 +1,9 @@
 # Flitsmeister DOT BLE protocol
 
 Reverse engineered from the Flitsmeister Android app 15.1.1 (build 1293,
-bundled in this repository as the `.apkm` next to this file) and from the
-Dot firmware 1.0.14 bundled inside it. App sources refer to the decompiled
-tree of that APK.
+the `.apkm` next to this file, kept out of git by `.gitignore`) and from
+the Dot firmware 1.0.14 bundled inside it. App sources refer to the
+decompiled tree of that APK.
 
 ## Device
 
@@ -142,7 +142,7 @@ Write to `27831001-33ee-9b9c-124d-109d6b0c0a91`, 10 bytes, write with response. 
 | | | 65 | speech: left lane closed |
 | | | 66 | speech: right lane closed |
 
-Sound slot 14 is unused.
+Sound slots 14 and 17 to 29 are unused.
 
 ### Packets the app sends
 
@@ -153,17 +153,17 @@ Layout per row: type, color, value, primary, secondary, end, cut off.
 | Startup after connect | `0B FF 00 28 4A 00 00 00 00 00` |
 | Fade out, stop everything | `04 00 00 00 00 00 00 00 00 00` |
 | Fade out, keep prior state | `04 00 00 00 00 00 00 00 00 01` |
-| Speed trap alert | `01 FF 00 28 4A 03 0C 20 01 01` |
-| Speed camera alert | `01 FF 02 F2 FF 03 0C 21 01 01` |
-| Traffic camera alert | `01 FF 02 F2 FF 03 3F 00 01 01` |
-| Average speed check start | `01 FF 00 00 CE 02 0A 22 01 01` |
+| Speed trap alert | `01 FF 00 28 4A 03 0C 20 01 00` |
+| Speed camera alert | `01 FF 02 F2 FF 03 0C 21 01 00` |
+| Traffic camera alert | `01 FF 02 F2 FF 03 3F 00 01 00` |
+| Average speed check start | `01 FF 00 00 CE 02 0A 22 01 00` |
 | Average speed check end | `02 FF 00 00 CE 00 0D 23 00 00` |
 | Traffic jam start | `01 FF FF 30 00 02 0B 1E 00 00` |
 | Traffic jam end | `02 FF FF 30 00 00 07 00 00 00` |
-| Police hotspot | `01 FF 80 00 FF 03 08 24 01 01` |
-| Roadworks | `01 FF FF 30 00 02 0B 1F 01 01` |
-| Incident, general | `01 FF FF 05 05 02 0B <speech> 01 01` |
-| Lane closure | `01 FF FF 05 05 03 0B <speech> 00 01` |
+| Police hotspot | `01 FF 80 00 FF 03 08 24 01 00` |
+| Roadworks | `01 FF FF 30 00 02 0B 1F 01 00` |
+| Incident, general | `01 FF FF 05 05 02 0B <speech> 01 00` |
+| Lane closure | `01 FF FF 05 05 03 0B <speech> 00 00` |
 | Ambulance | `06 FF 00 28 4A 04 05 2A 00 00` |
 | Fire truck | `06 FF 00 28 4A 04 06 2B 00 00` |
 | Police | `01 FF 00 28 4A 04 06 00 00 00` |
@@ -172,7 +172,7 @@ Layout per row: type, color, value, primary, secondary, end, cut off.
 | Wrong way driving | `07 FF FF 05 05 00 0F 00 00 00` |
 | Wrong way driver | `01 FF FF 05 05 02 10 3C 01 00` |
 | Approach progress | `03 <color> <leds 1-8> 00 00 00 01` |
-| Overspeed | `05 FF FF 05 05 <leds 1-8> 09 00 00 01` |
+| Overspeed | `05 FF FF 05 05 <leds 1-8> 09 00 00 00` |
 | Reporting, button held | `08 00 00 00 00 00 04 00 00 00` |
 | Brightness sample | `03 FF FF FF FF 08 00 00 00 01` |
 | Orientation sample | `01 FF 00 28 4A 00 00 00 00 01` |
@@ -220,8 +220,9 @@ After a brightness or rotation write the app reads the characteristic back and p
 | Motion `...1580` | 1 byte: 0 parked, any other value driving. Driven by the accelerometer, the device sleeps while parked and wakes on motion |
 | Serial number `0x2A25` | raw bytes, redacted in captures. The app hashes them with `UUID.nameUUIDFromBytes` (MD5) and uppercases the result |
 
-Observed on hardware: the charging state payload was `00 a3 02` while the
-battery was full on USB power. Bytes 0 and 1 are unknown, likely flags.
+Observed on hardware: the charging state payload was `00 a3 02` while
+the device reported charging done at a 69 percent battery level on USB
+power. Bytes 0 and 1 are unknown, likely flags.
 The button event payloads in the table above are real indication payloads
 from a retail device.
 

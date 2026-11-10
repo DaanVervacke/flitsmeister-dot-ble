@@ -18,28 +18,28 @@ def test_fade_out_without_cut_off() -> None:
 
 
 def test_speed_trap() -> None:
-    assert animations.speed_trap().to_bytes() == bytes.fromhex("01ff00284a030c200101")
+    assert animations.speed_trap().to_bytes() == bytes.fromhex("01ff00284a030c200100")
 
 
 def test_speed_trap_not_rateable() -> None:
     assert animations.speed_trap(rateable=False).to_bytes() == bytes.fromhex(
-        "01ff00284a030c200001"
+        "01ff00284a030c200000"
     )
 
 
 def test_speed_cam() -> None:
-    assert animations.speed_cam().to_bytes() == bytes.fromhex("01ff02f2ff030c210101")
+    assert animations.speed_cam().to_bytes() == bytes.fromhex("01ff02f2ff030c210100")
 
 
 def test_traffic_camera() -> None:
     assert animations.traffic_camera().to_bytes() == bytes.fromhex(
-        "01ff02f2ff033f000101"
+        "01ff02f2ff033f000100"
     )
 
 
 def test_avg_speed_check_start() -> None:
     assert animations.avg_speed_check_start().to_bytes() == bytes.fromhex(
-        "01ff0000ce020a220101"
+        "01ff0000ce020a220100"
     )
 
 
@@ -63,18 +63,18 @@ def test_traffic_jam_end() -> None:
 
 def test_police_hotspot() -> None:
     assert animations.police_hotspot().to_bytes() == bytes.fromhex(
-        "01ff8000ff0308240101"
+        "01ff8000ff0308240100"
     )
 
 
 def test_roadworks() -> None:
-    assert animations.roadworks().to_bytes() == bytes.fromhex("01ffff3000020b1f0101")
+    assert animations.roadworks().to_bytes() == bytes.fromhex("01ffff3000020b1f0100")
 
 
 def test_incident() -> None:
     animation = animations.incident(speech=animations.DotSound.SPEECH_ACCIDENT)
 
-    assert animation.to_bytes() == bytes.fromhex("01ffff0505020b260101")
+    assert animation.to_bytes() == bytes.fromhex("01ffff0505020b260100")
 
 
 def test_incident_not_rateable() -> None:
@@ -82,7 +82,7 @@ def test_incident_not_rateable() -> None:
         speech=animations.DotSound.SPEECH_ACCIDENT, rateable=False
     )
 
-    assert animation.to_bytes() == bytes.fromhex("01ffff0505020b260001")
+    assert animation.to_bytes() == bytes.fromhex("01ffff0505020b260000")
 
 
 def test_lane_closure() -> None:
@@ -90,9 +90,9 @@ def test_lane_closure() -> None:
     middle = animations.lane_closure(speech=animations.DotSound.SPEECH_LANE_CLOSED)
     right = animations.lane_closure(speech=animations.DotSound.SPEECH_RIGHT_LANE_CLOSED)
 
-    assert left.to_bytes() == bytes.fromhex("01ffff0505030b410001")
-    assert middle.to_bytes() == bytes.fromhex("01ffff0505030b400001")
-    assert right.to_bytes() == bytes.fromhex("01ffff0505030b420001")
+    assert left.to_bytes() == bytes.fromhex("01ffff0505030b410000")
+    assert middle.to_bytes() == bytes.fromhex("01ffff0505030b400000")
+    assert right.to_bytes() == bytes.fromhex("01ffff0505030b420000")
 
 
 def test_ambulance() -> None:
@@ -146,9 +146,16 @@ def test_progress_clamps_the_led_count() -> None:
     assert animations.progress(color=color, fraction=1.5).value == 8
 
 
+def test_progress_rounds_halves_up_like_the_app() -> None:
+    color = animations.DotColor.SUCCESS
+
+    assert animations.progress(color=color, fraction=0.3125).value == 3
+    assert animations.progress(color=color, fraction=0.25).value == 2
+
+
 def test_overspeed() -> None:
     assert animations.overspeed(fraction=0.5).to_bytes() == bytes.fromhex(
-        "05ffff05050409000001"
+        "05ffff05050409000000"
     )
 
 

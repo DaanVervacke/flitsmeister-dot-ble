@@ -381,6 +381,19 @@ async def test_drive_controls() -> None:
     assert animations.startup().to_bytes() in writes
     assert animations.speed_trap().to_bytes() in writes
     assert animations.fade_out().to_bytes() in writes
+    assert (
+        animations.incident(speech=animations.DotSound.SPEECH_ACCIDENT).to_bytes()
+        in writes
+    )
+    assert (
+        animations.lane_closure(
+            speech=animations.DotSound.SPEECH_LANE_CLOSED
+        ).to_bytes()
+        in writes
+    )
+    assert animations.brightness_sample().to_bytes() in writes
+    assert animations.orientation_sample().to_bytes() in writes
+    assert animations.fade_out_without_cut_off().to_bytes() in writes
     assert bytes((Volume.SILENT,)) in writes
     assert bytes((Volume.HARD,)) in writes
     assert bytes((Brightness.BRIGHTNESS_10,)) in writes

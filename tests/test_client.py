@@ -445,7 +445,7 @@ async def test_play_animation_writes_the_packet(transport: FakeTransport) -> Non
     async with client:
         await client.play_animation(animations.speed_trap())
 
-    assert transport.writes == [bytes.fromhex("01ff00284a030c200101")]
+    assert transport.writes == [bytes.fromhex("01ff00284a030c200100")]
     assert transport.write_characteristics == [ANIMATION_CHARACTERISTIC_UUID]
     assert transport.responses == [True]
 
@@ -654,6 +654,62 @@ async def test_press_timers_stop_at_disconnect(transport: FakeTransport) -> None
     await asyncio.sleep(0.1)
 
     assert actions == [ButtonAction.PUSHED]
+
+
+async def test_second_push_cancels_the_first_timer(transport: FakeTransport) -> None:
+    actions: list[ButtonAction] = []
+
+    async def collect(update: DotUpdate) -> None:
+        if update.button is not None:
+            actions.append(update.button.action)
+
+    client = make_client(transport, update_callback=collect, long_press_seconds=0.1)
+    async with client:
+        transport.notify(BUTTON_EVENTS_CHARACTERISTIC_UUID, b"\x01\x00")
+        await drain(client)
+        await asyncio.sleep(0.05)
+        transport.notify(BUTTON_EVENTS_CHARACTERISTIC_UUID, b"\x01\x00")
+        await drain(client)
+        await asyncio.sleep(0.2)
+
+    assert actions == [
+        ButtonAction.PUSHED,
+        ButtonAction.PUSHED,
+        ButtonAction.LONG_PRESS,
+    ]
+
+
+async def test_duplicate_animation_still_needs_a_ready_session(
+    transport: FakeTransport,
+) -> None:
+    client = make_client(transport)
+    await client.connect()
+    await client.play_animation(
+        animations.progress(color=DotColor.SPEED_TRAP, fraction=0.5)
+    )
+    await client.disconnect()
+
+    with pytest.raises(DotNotReadyError, match="not ready"):
+        await client.play_animation(
+            animations.progress(color=DotColor.SPEED_TRAP, fraction=0.5)
+        )
+
+
+async def test_sync_connection_lost_callback(transport: FakeTransport) -> None:
+    lost: list[Exception] = []
+    done = asyncio.Event()
+
+    def on_lost(error: Exception) -> None:
+        lost.append(error)
+        done.set()
+
+    client = make_client(transport, connection_lost_callback=on_lost)
+    await client.connect()
+    transport.drop()
+    await done.wait()
+
+    assert lost
+    await client.disconnect()
 
 
 def test_invalid_long_press_timing(transport: FakeTransport) -> None:
