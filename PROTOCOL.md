@@ -1,9 +1,7 @@
 # Flitsmeister DOT BLE protocol
 
-Reverse engineered from the Flitsmeister Android app 15.1.1 (build 1293,
-the `.apkm` next to this file, kept out of git by `.gitignore`) and from
-the Dot firmware 1.0.14 bundled inside it. App sources refer to the
-decompiled tree of that APK.
+Based on the Flitsmeister Android app 15.1.1 and the Dot firmware
+1.0.14 bundled inside it.
 
 ## Device
 
@@ -22,7 +20,7 @@ All custom UUIDs share the base `2783xxxx-33ee-9b9c-124d-109d6b0c0a91`.
 |---|---|---|---|---|
 | FM DOT | `27831530-33ee-9b9c-124d-109d6b0c0a91` | Animation | `27831001-33ee-9b9c-124d-109d6b0c0a91` | write |
 | | | Button events | `27831002-33ee-9b9c-124d-109d6b0c0a91` | indicate |
-| | | Speech language | `27831003-33ee-9b9c-124d-109d6b0c0a91` | write |
+| | | Speech language | `27831003-33ee-9b9c-124d-109d6b0c0a91` | read |
 | | | Volume | `27831004-33ee-9b9c-124d-109d6b0c0a91` | read, write |
 | | | Brightness | `27831005-33ee-9b9c-124d-109d6b0c0a91` | read, write |
 | | | LED rotation | `27831006-33ee-9b9c-124d-109d6b0c0a91` | read, write |
@@ -50,7 +48,7 @@ The SMP characteristic UUID differs from stock Zephyr (`DA2E988E-F315-4E01-AE9E-
 - Manufacturer specific data, company ID 871 (`0x0367`), identifies the other devices: bytes 1-2 equal `04 04` for FM One, `0C 28` for FM Two. The Dot is matched on name instead
 - The Dot sleeps while parked and advertises only in bursts after
   accelerometer motion, so a scanner must keep scanning while it connects
-- The firmware also builds an iBeacon advertisement set. The app ignores it for the Dot, likely used for in-car presence detection
+- The firmware also builds an iBeacon advertisement set. The app ignores it for the Dot. Its purpose is unknown, possibly in-car presence detection
 
 ## Animation characteristic
 
@@ -62,7 +60,7 @@ Write to `27831001-33ee-9b9c-124d-109d6b0c0a91`, 10 bytes, write with response. 
 |---|---|---|---|
 | 0 | 1 | type | animation type, see below |
 | 1 | 4 | color | ARGB, big-endian, `00 00 00 00` when the animation has no color |
-| 5 | 1 | value | number of LEDs to light, 1 to 8, for progression types, otherwise 0 |
+| 5 | 1 | value | number of LEDs to light, 1 to 8, for progression types. Alert packets from the app carry 0 to 4 here, purpose unconfirmed |
 | 6 | 1 | primary sound | sound ID, 0 for none |
 | 7 | 1 | secondary sound | sound ID, 0 for none |
 | 8 | 1 | end behavior | what happens after the alert, see below |
@@ -109,6 +107,8 @@ Write to `27831001-33ee-9b9c-124d-109d6b0c0a91`, 10 bytes, write with response. 
 | 2 | progression | |
 
 ### Sound IDs
+
+The speech IDs play from the voice in the firmware image. A live DOT on firmware 2.9.0 with the Dutch voice plays nothing for 48, 51, 52, 53, 55, 56, 57, 58, 59 and 61 and reports no error. Every other ID in the table plays.
 
 | ID | Sound | ID | Sound |
 |---|---|---|---|
@@ -191,9 +191,11 @@ Indication on `27831002-33ee-9b9c-124d-109d6b0c0a91`, 2 bytes. Byte 0 holds the 
 | Blue pushed | `00 01` |
 | Blue released | `00 02` |
 
+The LED rotation setting also swaps the buttons. Seen from the front with the USB-C port at the bottom, the right button reports as red and the left as blue with rotation 0 (normal). With rotation 1 (upside down) the left button reports as red and the right as blue.
+
 App behavior on a push, timed from the pushed indication:
 
-1. At 250 ms it writes the reporting animation, so the driver sees the hold is registering
+1. At 250 ms it writes the reporting animation, so the driver sees that the hold registers
 2. At 1000 ms total it sends the report to the Flitsmeister backend: red button files a speed trap, blue button files a dangerous situation
 3. A release before 1000 ms cancels the report
 4. A release before 250 ms counts as a short press: the app shows the battery level as a progress animation in green above 38 percent, orange above 13 percent, red below, and emits a button event to rate or dismiss an active alert
@@ -207,9 +209,19 @@ All writes are 1 byte, write with response.
 | Volume `...1004` | 0 silent, 1 low, 2 normal, 3 hard |
 | Brightness `...1005` | 10 to 100 in steps of 10. The app maps unknown values to 100 on read |
 | LED rotation `...1006` | 0 normal, 1 upside down. Flips the LED ring so mounting orientation does not invert the patterns |
-| Speech language `...1003` | 0 English, 1 Dutch, 2 German, 3 French. Flemish also maps to 1, every other language falls back to 0 |
 
 After a brightness or rotation write the app reads the characteristic back and plays the matching sample animation for 2 seconds.
+
+### Speech language
+
+The speech language characteristic `...1003` is read only on firmware 2.9.0. A write with response fails with the GATT error Write Not Permitted (`0x03`) and the link stays up. A DOT with the Dutch voice reads `01 01`.
+
+| Byte | Meaning |
+|---|---|
+| 0 | Language: 0 English, 1 Dutch, 2 German, 3 French |
+| 1 | Unconfirmed, likely the voice. Compare the value after flashing the other voice to confirm |
+
+The voice is part of the firmware image. To change the language or the voice (male or female) the app downloads `{device}-{version}-{language}-{voice}-dfu.zip`, built from the `firmware_template` and `voices` of the update manifest, and flashes it over MCUmgr. The app offers Dutch, English, French, German and Spanish.
 
 ## Status characteristics
 
@@ -217,14 +229,11 @@ After a brightness or rotation write the app reads the characteristic back and p
 |---|---|
 | Battery level `0x2A19` | 1 byte, 0 to 100 percent |
 | Charging state `0x2BED` | 3 or more bytes, the app reads byte 2: 0 consuming, 1 charging, 2 charging done |
-| Motion `...1580` | 1 byte: 0 parked, any other value driving. Driven by the accelerometer, the device sleeps while parked and wakes on motion |
+| Motion `...1580` | 1 byte: 0 parked, any other value driving. Driven by the accelerometer. The device sleeps while parked and wakes on motion |
 | Serial number `0x2A25` | raw bytes, redacted in captures. The app hashes them with `UUID.nameUUIDFromBytes` (MD5) and uppercases the result |
 
-Observed on hardware: the charging state payload was `00 a3 02` while
-the device reported charging done at a 69 percent battery level on USB
-power. Bytes 0 and 1 are unknown, likely flags.
-The button event payloads in the table above are real indication payloads
-from a retail device.
+Bytes 0 and 1 of the charging state are unknown. A device on USB power
+at 69 percent sends `00 a3 02` for charging done.
 
 ## Connection sequence
 
@@ -235,29 +244,13 @@ from a retail device.
 5. Read battery level, charging state, manufacturer name, model number, serial number, firmware revision, software revision, motion
 6. Write the startup animation
 
-A client that only subscribes and reads gets dropped by the device after
-about 4 seconds. A tour that writes continuously held the link for over
-70 seconds, so the Flitsmeister app's writes, the volume and the startup
-animation right after connecting, are what hold the link. The device
-also notifies the battery level periodically while connected, and the
-brightness and LED orientation writes were confirmed on hardware with
-their read back.
+The device drops a client that only subscribes and reads after about
+4 seconds. Writes keep the link up, which is why the app writes the
+volume and the startup animation right after connecting. The device
+notifies the battery level periodically while connected.
 
 ## Firmware update
 
 The Dot updates over MCUmgr image upload, not Nordic DFU. The app connects to the SMP service, uploads `build.signed.bin` from the update zip, and the device reboots into the new MCUboot image. The update zips contain a `manifest.json` with the board and SoC and the signed binary.
 
-The app bundles three versions: `dot_log_106.zip` (1.0.6), `dot_fw_1012.zip` (1.0.12), `dot_fw_1014.zip` (1.0.14), stored in the APK at `res/raw/`. The update manifest is fetched from `https://cdn.flitsmeister.app/firmware/android` in an app-specific encrypted format. Firmware packages carry per-language voice options, the selected speech language and gender decide which package the app downloads.
-
-## App source references
-
-| Topic | File |
-|---|---|
-| Dot protocol, UUIDs, button handling | `nl/flitsmeister/features/bledevices/models/data/dot/FlitsmeisterDot.java` |
-| Animation catalog | `nl/flitsmeister/features/bledevices/models/data/dot/animation/DotAnimations.java` |
-| Animation model and enums | `nl/flitsmeister/features/bledevices/models/data/dot/animation/AnimationDTO.java` |
-| Packet serialization | `nl/flitsmeister/features/bledevices/models/data/dot/animation/AnimationDTO_ExtensionsKt.java` |
-| Scanning and device identification | `nl/flitsmeister/managers/ble/BleDeviceScanner.java` |
-| Write queue, notification setup | `nl/flitsmeister/features/bledevices/models/data/BleReadWriteQueue.java` |
-| Firmware update flow | `nl/flitsmeister/managers/ble/BleDeviceUpdater.java` |
-| SMP transport UUIDs | `defpackage/nc6.java` |
+The app bundles three versions: `dot_log_106.zip` (1.0.6), `dot_fw_1012.zip` (1.0.12), `dot_fw_1014.zip` (1.0.14), stored in the APK at `res/raw/`. The update manifest is fetched from `https://cdn.flitsmeister.app/firmware/android` in an app-specific encrypted format. Firmware packages carry per-language voice options. The selected speech language and gender decide which package the app downloads.

@@ -314,9 +314,9 @@ class FlitsmeisterDotClient:
             DotConnectionError: The transport failed, the link dropped
                 while connecting, or ``disconnect()`` cancelled the
                 attempt. Transport errors are chained as ``__cause__``.
-                A slow update callback also trips this timeout.
             DotTimeoutError: A subscribe or a read did not finish within
-                ``response_timeout_seconds``.
+                ``response_timeout_seconds``. A slow update callback also
+                trips this timeout.
             DotProtocolError: A read returned a malformed payload.
         """
         task = asyncio.create_task(self._connect())

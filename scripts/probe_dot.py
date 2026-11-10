@@ -56,8 +56,8 @@ async def list_advertisements(config: ProbeConfig) -> None:
 async def capture(config: ProbeConfig) -> None:
     """Connect read-only and log every payload for the capture window.
 
-    Retries the scan and connect cycle, because the DOT sleeps its
-    advertising off between motion events.
+    Retries the scan and connect cycle, because the DOT stops
+    advertising between motion events.
     """
     with common.CaptureWriter(config.output) as writer:
         async with common.open_scanner(config.proxy, config.noise_psk) as scan:

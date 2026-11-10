@@ -46,7 +46,8 @@ battery, charging and motion characteristics and read the device
 information. The session is then
 :attr:`~flitsmeister_dot_ble.ConnectionStatus.READY`.
 A transport failure during ``connect()`` raises
-:class:`~flitsmeister_dot_ble.DotConnectionError`.
+:class:`~flitsmeister_dot_ble.DotConnectionError`, a timeout raises
+:class:`~flitsmeister_dot_ble.DotTimeoutError`.
 Every decoded value updates ``client.state`` and is passed to the
 optional ``update_callback`` as a :class:`~flitsmeister_dot_ble.DotUpdate`.
 Button pushes and releases arrive as

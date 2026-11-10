@@ -20,10 +20,17 @@ ships no Intel macOS wheels.
 
 The scripts under `scripts/` talk to a real DOT. Run them as modules:
 
-```bash
-uv run python -m scripts.probe_dot
-uv run python -m scripts.drive_dot_client
-```
+| Script | Does |
+| --- | --- |
+| `scripts.probe_dot` | connects read-only and records the traffic as JSON lines |
+| `scripts.drive_dot_client` | prints every update, `--controls` plays every preset and cycles the settings |
+| `scripts.live_validate` | runs every public function and asks you whether the DOT responded correctly |
+
+`--controls` and `live_validate` change device settings and need the
+local config file `scripts/drive_dot_client.local.json`, a JSON object
+with `proxy`, `noise_psk` and `address`. `--proxy` routes the
+connection through an ESPHome Bluetooth proxy. Captures redact the
+serial number.
 
 ## Running the checks
 
@@ -33,7 +40,7 @@ Before opening a pull request, run the full gate:
 uv run python -m scripts.check
 ```
 
-This is the canonical check. It stops at the first failure and runs exactly:
+It stops at the first failure and runs these steps in order:
 
 ```text
 version drift check

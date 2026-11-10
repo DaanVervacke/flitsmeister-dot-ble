@@ -71,8 +71,7 @@ def decode_charging_state(payload: bytes) -> ChargingState:
     """Decode the charging state from the battery charging characteristic.
 
     The Flitsmeister app reads the state from byte 2 of the value. The
-    meaning of the earlier bytes is unknown, the first captures will
-    tell.
+    meaning of bytes 0 and 1 is unknown.
 
     Raises:
         DotProtocolError: The payload is shorter than 3 bytes, or byte 2

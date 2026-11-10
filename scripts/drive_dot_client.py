@@ -2,7 +2,7 @@
 
 With ``--controls`` the script plays every animation preset and cycles
 the settings once. The flag needs the local config file as
-confirmation, because the device in range is the real thing.
+confirmation, because the flag changes the settings of a real device.
 """
 
 import argparse
@@ -175,7 +175,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def config_from_args(argv: Sequence[str] | None = None) -> RunConfig:
-    """Parse the command line, the config file fills the unset options.
+    """Parse the command line and fill the unset options from the config file.
 
     Raises:
         SystemExit: ``--controls`` was given without a config file, or

@@ -2,7 +2,7 @@
 
 ``DotAnimation`` holds one animation and ``to_bytes`` builds the
 10-byte packet for the animation characteristic. The preset functions
-return the packets the Flitsmeister app sends for each situation,
+return the packets the Flitsmeister app sends for each situation.
 ``PROTOCOL.md`` in the repository root documents the wire format.
 """
 
@@ -92,8 +92,12 @@ class DotEnd(IntEnum):
 class DotSound(IntEnum):
     """Sound the DOT speaker plays, bytes 6 and 7 of the packet.
 
-    Slot 14 and slots 17 to 29 carry no sound, the Flitsmeister app
-    leaves them unused.
+    Slot 14 and slots 17 to 29 carry no sound. The Flitsmeister app
+    leaves them unused. The speech comes from the voice in the firmware
+    image. The Dutch voice on firmware 2.9.0 plays nothing for
+    dangerous situation 2 and 3, reindeer on road, moose nearby, snow on
+    road, strong wind, ice on road, reindeer near road, railway crossing
+    and wrong way driving. The DOT reports no error for a silent ID.
     """
 
     NO_AUDIO = 0
@@ -537,6 +541,9 @@ def railway_crossing() -> DotAnimation:
     The LEDs breathe from the middle outward in the danger color
     while the speaker plays the safety notification sound and the
     railway crossing announcement.
+
+    The Dutch voice on firmware 2.9.0 has no railway crossing
+    announcement, so only the safety notification sound plays.
     """
     return DotAnimation(
         type=DotAnimationType.MID_TO_OUTWARD_AND_BREATHE,
@@ -550,8 +557,8 @@ def railway_crossing() -> DotAnimation:
 def wrong_way_driving() -> DotAnimation:
     """Return the warning that the car drives the wrong way.
 
-    The LEDs flash and then stay lit in the danger color while the
-    speaker plays the wrong direction sound.
+    The LEDs flash in the danger color, stay lit for a few seconds and
+    fade out while the speaker plays the wrong direction sound.
     """
     return DotAnimation(
         type=DotAnimationType.FLASH_AND_STATIC,
@@ -584,13 +591,13 @@ def wrong_way_driver() -> DotAnimation:
 def progress(*, color: int, fraction: float) -> DotAnimation:
     """Return the approach progress animation.
 
-    The LEDs light one by one from the top down, the fraction sets
+    The LEDs light one by one from the top down. The fraction sets
     how many of the eight LEDs are lit.
 
     Args:
         color: The ARGB color of the lit LEDs, a ``DotColor`` member
             or a custom int.
-        fraction: The progress from 0 to 1, values outside that range
+        fraction: The progress from 0 to 1. Values outside that range
             clamp to between one and eight lit LEDs.
     """
     return DotAnimation(
@@ -607,7 +614,7 @@ def overspeed(*, fraction: float) -> DotAnimation:
     the reduce speed sound.
 
     Args:
-        fraction: The progress from 0 to 1, values outside that range
+        fraction: The progress from 0 to 1. Values outside that range
             clamp to between one and eight lit LEDs.
     """
     return DotAnimation(

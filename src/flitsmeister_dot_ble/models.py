@@ -52,10 +52,10 @@ class ButtonAction(IntEnum):
     """What happened to a button.
 
     ``PUSHED`` and ``RELEASED`` come straight from the wire. The client
-    resolves ``SHORT_PRESS`` and ``LONG_PRESS`` from the hold time, a
+    resolves ``SHORT_PRESS`` and ``LONG_PRESS`` from the hold time. A
     release before ``long_press_seconds`` is a short press and holding
-    past it is a long press, like the Flitsmeister app, which sends its
-    report after a full second.
+    past it is a long press. The Flitsmeister app works the same way and
+    sends its report after a full second.
     """
 
     PUSHED = 1
