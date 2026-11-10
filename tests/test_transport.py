@@ -4,6 +4,8 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
+from aioesphomeapi.core import BluetoothGATTAPIError
+from aioesphomeapi.model import BluetoothGATTError
 from bleak import BleakClient
 from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError, BleakGATTProtocolError, BleakGATTProtocolErrorCode
@@ -284,23 +286,9 @@ async def test_notifications_after_disconnect_are_dropped(
     assert received == []
 
 
-class ProxyGattStatus:
-    """Shape of the ``error`` field on an aioesphomeapi GATT error."""
-
-    def __init__(self, error: int) -> None:
-        self.error = error
-
-
-class ProxyGattError(Exception):
-    """Stand in for aioesphomeapi ``BluetoothGATTAPIError``."""
-
-    def __init__(self, error: int) -> None:
-        super().__init__(f"Bluetooth GATT Error error={error}")
-        self.error = ProxyGattStatus(error)
-
-
 def proxy_bleak_error(error: int) -> BleakError:
-    cause = ProxyGattError(error)
+    status = BluetoothGATTError.from_dict({"address": 0, "handle": 0, "error": error})
+    cause = BluetoothGATTAPIError(status)
     wrapped = BleakError(str(cause))
     wrapped.__cause__ = cause
     return wrapped
@@ -332,6 +320,8 @@ async def test_proxy_refusal_becomes_a_gatt_protocol_error(
     "error",
     [
         proxy_bleak_error(-1),
+        proxy_bleak_error(0),
+        proxy_bleak_error(256),
         BleakError("plain"),
         BleakGATTProtocolError(BleakGATTProtocolErrorCode.READ_NOT_PERMITTED),
     ],

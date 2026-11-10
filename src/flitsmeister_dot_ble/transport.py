@@ -2,8 +2,8 @@
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
-from contextlib import suppress
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager, suppress
 
 from bleak import BleakClient
 from bleak.backends.characteristic import BleakGATTCharacteristic
@@ -34,6 +34,20 @@ def _proxy_att_error(err: BleakError) -> int | None:
     if isinstance(code, int) and code in _ATT_ERROR_CODES:
         return code
     return None
+
+
+@contextmanager
+def _proxy_refusals_as_gatt_errors() -> Iterator[None]:
+    """Raise ``BleakGATTProtocolError`` for a refusal an ESPHome proxy reports."""
+    try:
+        yield
+    except BleakGATTProtocolError:
+        raise
+    except BleakError as err:
+        code = _proxy_att_error(err)
+        if code is None:
+            raise
+        raise BleakGATTProtocolError(code) from err
 
 
 class BleakTransport(BleTransport):
@@ -156,15 +170,8 @@ class BleakTransport(BleTransport):
             BleakGATTProtocolError: The device refused the read, also when
                 an ESPHome proxy reports the refusal.
         """
-        try:
+        with _proxy_refusals_as_gatt_errors():
             return bytes(await self.client.read_gatt_char(characteristic))
-        except BleakGATTProtocolError:
-            raise
-        except BleakError as err:
-            code = _proxy_att_error(err)
-            if code is None:
-                raise
-            raise BleakGATTProtocolError(code) from err
 
     async def write_gatt_char(
         self, characteristic: str, data: bytes, response: bool = False
@@ -176,15 +183,8 @@ class BleakTransport(BleTransport):
             BleakGATTProtocolError: The device refused the write, also when
                 an ESPHome proxy reports the refusal.
         """
-        try:
+        with _proxy_refusals_as_gatt_errors():
             await self.client.write_gatt_char(characteristic, data, response=response)
-        except BleakGATTProtocolError:
-            raise
-        except BleakError as err:
-            code = _proxy_att_error(err)
-            if code is None:
-                raise
-            raise BleakGATTProtocolError(code) from err
 
     def _on_disconnect(self, _client: BleakClient) -> None:
         callback = self._disconnected_callback

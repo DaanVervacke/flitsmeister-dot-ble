@@ -743,6 +743,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "aioesphomeapi" },
     { name = "bandit" },
     { name = "bleak-esphome" },
     { name = "coverage" },
@@ -765,6 +766,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "aioesphomeapi", specifier = ">=46.28.0" },
     { name = "bandit", specifier = ">=1.9.4" },
     { name = "bleak-esphome", specifier = ">=4.1.0" },
     { name = "coverage", specifier = ">=7.15.2" },

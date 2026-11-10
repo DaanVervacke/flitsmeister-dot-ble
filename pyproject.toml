@@ -45,6 +45,7 @@ source-include = ["tests/**"]
 
 [dependency-groups]
 dev = [
+    "aioesphomeapi>=46.28.0",
     "bandit>=1.9.4",
     "bleak-esphome>=4.1.0",
     "coverage>=7.15.2",
