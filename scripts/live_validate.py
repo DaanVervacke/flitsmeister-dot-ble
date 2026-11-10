@@ -1111,22 +1111,14 @@ async def connect_and_validate(
 ) -> list[CheckResult]:
     """Scan for the DOT and run the checks against it."""
     with common.CaptureWriter(config.output) as writer:
-        async with common.open_scanner(config.proxy, config.noise_psk) as scan:
-            for attempt in range(1, common.CONNECT_ATTEMPTS + 1):
-                device = await common.find_dot(
-                    scan, config.address, config.scan_seconds
-                )
-                try:
-                    async with common.background_scanner(config.proxy is None):
-                        transport = CountingTransport(
-                            common.make_transport(device, config.proxy), writer
-                        )
-                        return await validate(config, transport, console)
-                except DotConnectionError:
-                    if attempt == common.CONNECT_ATTEMPTS:
-                        raise
-                    _LOGGER.warning("Connect attempt %d failed, rescanning", attempt)
-    raise AssertionError
+        return await common.run_with_dot(
+            proxy=config.proxy,
+            noise_psk=config.noise_psk,
+            address=config.address,
+            scan_seconds=config.scan_seconds,
+            wrap=partial(CountingTransport, capture=writer),
+            body=partial(validate, config, console=console),
+        )
 
 
 def _parser() -> argparse.ArgumentParser:

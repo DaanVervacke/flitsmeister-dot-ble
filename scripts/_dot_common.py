@@ -21,12 +21,14 @@ from flitsmeister_dot_ble import (
     BleakTransport,
     BleTransport,
     DisconnectedCallback,
+    DotConnectionError,
     DotState,
     NotificationCallback,
     is_dot_advertisement,
 )
 from flitsmeister_dot_ble.const import SERIAL_NUMBER_CHARACTERISTIC_UUID
 from habluetooth import BluetoothScanningMode, BluetoothServiceInfoBleak
+from habluetooth.central_manager import CentralBluetoothManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -218,6 +220,7 @@ async def open_scanner(
         ESPHomeDeviceConfig(address=proxy_host(proxy), noise_psk=noise_psk)
     )
     bluetooth_manager = DiscoveryBluetoothManager()
+    previous_manager = CentralBluetoothManager.manager
     try:
         await bluetooth_manager.async_setup()
         habluetooth.set_manager(bluetooth_manager)
@@ -235,6 +238,7 @@ async def open_scanner(
             bluetooth_manager.async_stop()
         except Exception:
             _LOGGER.debug("Stopping the Bluetooth manager failed", exc_info=True)
+        CentralBluetoothManager.manager = previous_manager
 
 
 def make_transport(device: BLEDevice, proxy: str | None) -> BleakTransport:
@@ -295,6 +299,39 @@ async def find_dot(scan: Scanner, address: str | None, seconds: float) -> BLEDev
             elif sighting.is_dot:
                 return sighting.device
     raise TimeoutError("Flitsmeister DOT was not found")
+
+
+async def run_with_dot[TransportT: BleTransport, ResultT](
+    *,
+    proxy: str | None,
+    noise_psk: str | None,
+    address: str | None,
+    scan_seconds: float,
+    wrap: Callable[[BleakTransport], TransportT],
+    body: Callable[[TransportT], Awaitable[ResultT]],
+) -> ResultT:
+    """Find the DOT, connect and return the result of ``body``.
+
+    ``wrap`` turns the Bleak transport into the transport ``body`` gets.
+    The DOT stops advertising between motion events, so a failed connect
+    starts a new scan, up to ``CONNECT_ATTEMPTS`` times.
+
+    Raises:
+        DotConnectionError: Every connect attempt failed.
+        TimeoutError: No matching device was seen before the deadline.
+    """
+    async with open_scanner(proxy, noise_psk) as scan:
+        attempt = 1
+        while True:
+            device = await find_dot(scan, address, scan_seconds)
+            try:
+                async with background_scanner(proxy is None):
+                    return await body(wrap(make_transport(device, proxy)))
+            except DotConnectionError:
+                if attempt == CONNECT_ATTEMPTS:
+                    raise
+                _LOGGER.warning("Connect attempt %d failed, rescanning", attempt)
+                attempt += 1
 
 
 def state_record(state: DotState) -> dict[str, object]:

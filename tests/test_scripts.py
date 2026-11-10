@@ -16,6 +16,7 @@ from flitsmeister_dot_ble import (
     animations,
     is_dot_advertisement,
 )
+from flitsmeister_dot_ble import transport as transport_module
 from flitsmeister_dot_ble.const import (
     BATTERY_LEVEL_CHARACTERISTIC_UUID,
     BRIGHTNESS_CHARACTERISTIC_UUID,
@@ -23,6 +24,7 @@ from flitsmeister_dot_ble.const import (
     READ_CHARACTERISTICS,
     SERIAL_NUMBER_CHARACTERISTIC_UUID,
 )
+from habluetooth.central_manager import CentralBluetoothManager
 from scripts import _dot_common as common
 from scripts import drive_dot_client, probe_dot
 
@@ -208,6 +210,51 @@ async def test_background_scanner_survives_stop_failure(
 async def test_local_scanner_is_yielded_without_proxy() -> None:
     async with common.open_scanner(None, None) as scan:
         assert scan is common.scan_local
+
+
+class FakeApiConnection:
+    """Stand in for the bleak-esphome connection manager."""
+
+    def __init__(self, _config: object) -> None:
+        self.stopped = False
+
+    async def start(self) -> None:
+        await asyncio.sleep(0)
+
+    async def stop(self) -> None:
+        await asyncio.sleep(0)
+        self.stopped = True
+
+
+class FakeBluetoothManager:
+    """Stand in for the habluetooth manager the proxy scanner sets up."""
+
+    async def async_setup(self) -> None:
+        await asyncio.sleep(0)
+
+    def async_current_scanners(self) -> list[object]:
+        return []
+
+    def async_stop(self) -> None:
+        return None
+
+
+async def test_proxy_scanner_restores_the_previous_bluetooth_manager(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    previous = object()
+    monkeypatch.setattr(CentralBluetoothManager, "manager", previous)
+    monkeypatch.setattr(common, "APIConnectionManager", FakeApiConnection)
+    monkeypatch.setattr(common, "DiscoveryBluetoothManager", FakeBluetoothManager)
+
+    async with common.open_scanner("proxy.local", None):
+        assert isinstance(current_manager(), FakeBluetoothManager)
+
+    assert current_manager() is previous
+
+
+def current_manager() -> object:
+    return CentralBluetoothManager.manager
 
 
 def test_probe_config_from_args() -> None:
@@ -433,9 +480,22 @@ def test_drive_main_reports_failure(
     assert any(record.exc_info for record in caplog.records)
 
 
-def test_make_transport_uses_the_habluetooth_wrapper_for_a_proxy() -> None:
+async def test_make_transport_uses_the_habluetooth_wrapper_for_a_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client_classes: list[object] = []
+
+    async def establish(
+        client_class: object, *_args: object, **_kwargs: object
+    ) -> object:
+        client_classes.append(client_class)
+        raise OSError("no adapter in tests")
+
+    monkeypatch.setattr(transport_module, "establish_connection", establish)
     device = BLEDevice("AA:BB:CC:DD:EE:FF", "FM DOT", {})
-    local = common.make_transport(device, None)
-    proxied = common.make_transport(device, "10.0.0.2")
-    assert local._client_class is not habluetooth.HaBleakClientWrapper
-    assert proxied._client_class is habluetooth.HaBleakClientWrapper
+    for proxy in (None, "10.0.0.2"):
+        with pytest.raises(OSError, match="no adapter"):
+            await common.make_transport(device, proxy).connect(lambda: None)
+
+    assert client_classes[0] is not habluetooth.HaBleakClientWrapper
+    assert client_classes[1] is habluetooth.HaBleakClientWrapper

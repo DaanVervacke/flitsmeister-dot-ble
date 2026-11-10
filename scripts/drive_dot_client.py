@@ -12,12 +12,12 @@ import logging
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 from flitsmeister_dot_ble import (
     Brightness,
     DotColor,
-    DotConnectionError,
     DotUpdate,
     FlitsmeisterDotClient,
     LedOrientation,
@@ -136,23 +136,14 @@ async def run(config: RunConfig, transport: BleTransport) -> None:
 async def connect_and_run(config: RunConfig) -> None:
     """Scan for the DOT and run the client against it."""
     with common.CaptureWriter(config.output) as writer:
-        async with common.open_scanner(config.proxy, config.noise_psk) as scan:
-            for attempt in range(1, common.CONNECT_ATTEMPTS + 1):
-                device = await common.find_dot(
-                    scan, config.address, config.scan_seconds
-                )
-                try:
-                    async with common.background_scanner(config.proxy is None):
-                        transport = common.CaptureTransport(
-                            common.make_transport(device, config.proxy), writer
-                        )
-                        await run(config, transport)
-                except DotConnectionError:
-                    if attempt == common.CONNECT_ATTEMPTS:
-                        raise
-                    _LOGGER.warning("Connect attempt %d failed, rescanning", attempt)
-                else:
-                    return
+        await common.run_with_dot(
+            proxy=config.proxy,
+            noise_psk=config.noise_psk,
+            address=config.address,
+            scan_seconds=config.scan_seconds,
+            wrap=partial(common.CaptureTransport, capture=writer),
+            body=partial(run, config),
+        )
 
 
 def _parser() -> argparse.ArgumentParser:

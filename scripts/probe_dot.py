@@ -7,10 +7,11 @@ import os
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 from flitsmeister_dot_ble import (
-    DotConnectionError,
+    BleTransport,
     FlitsmeisterDotClient,
     __version__,
 )
@@ -60,32 +61,26 @@ async def capture(config: ProbeConfig) -> None:
     advertising between motion events.
     """
     with common.CaptureWriter(config.output) as writer:
-        async with common.open_scanner(config.proxy, config.noise_psk) as scan:
-            for attempt in range(1, common.CONNECT_ATTEMPTS + 1):
-                device = await common.find_dot(
-                    scan, config.address, config.scan_seconds
-                )
-                try:
-                    async with common.background_scanner(config.proxy is None):
-                        transport = common.CaptureTransport(
-                            common.make_transport(device, config.proxy), writer
-                        )
-                        async with FlitsmeisterDotClient(transport) as client:
-                            _LOGGER.info(
-                                "Connected manufacturer=%s model=%s firmware=%s"
-                                " software=%s",
-                                client.state.manufacturer_name,
-                                client.state.model_number,
-                                client.state.firmware_revision,
-                                client.state.software_revision,
-                            )
-                            await asyncio.sleep(config.capture_seconds)
-                except DotConnectionError:
-                    if attempt == common.CONNECT_ATTEMPTS:
-                        raise
-                    _LOGGER.warning("Connect attempt %d failed, rescanning", attempt)
-                else:
-                    return
+        await common.run_with_dot(
+            proxy=config.proxy,
+            noise_psk=config.noise_psk,
+            address=config.address,
+            scan_seconds=config.scan_seconds,
+            wrap=partial(common.CaptureTransport, capture=writer),
+            body=partial(_log_session, config.capture_seconds),
+        )
+
+
+async def _log_session(seconds: float, transport: BleTransport) -> None:
+    async with FlitsmeisterDotClient(transport) as client:
+        _LOGGER.info(
+            "Connected manufacturer=%s model=%s firmware=%s software=%s",
+            client.state.manufacturer_name,
+            client.state.model_number,
+            client.state.firmware_revision,
+            client.state.software_revision,
+        )
+        await asyncio.sleep(seconds)
 
 
 def _parser() -> argparse.ArgumentParser:
