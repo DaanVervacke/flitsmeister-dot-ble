@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 from bleak import BleakClient
 from bleak.backends.device import BLEDevice
+from bleak.exc import BleakError, BleakGATTProtocolError, BleakGATTProtocolErrorCode
 from bleak_retry_connector import BleakClientWithServiceCache
 from flitsmeister_dot_ble import BleakTransport, DotConnectionError
 from flitsmeister_dot_ble import transport as transport_module
@@ -27,6 +28,7 @@ class FakeBleakClient:
         self.fail_disconnect = False
         self.calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
         self.disconnected_callback: Callable[[Any], None] | None = None
+        self.fail_with: Exception | None = None
 
     async def start_notify(
         self, characteristic: str, callback: Callable[[Any, bytearray], None]
@@ -37,12 +39,16 @@ class FakeBleakClient:
         self.stopped.append(characteristic)
 
     async def read_gatt_char(self, characteristic: str) -> bytearray:
+        if self.fail_with is not None:
+            raise self.fail_with
         self.reads.append(characteristic)
         return bytearray(self.read_replies[characteristic])
 
     async def write_gatt_char(
         self, characteristic: str, data: bytes, response: bool = False
     ) -> None:
+        if self.fail_with is not None:
+            raise self.fail_with
         self.writes.append((characteristic, data, response))
 
     async def disconnect(self) -> None:
@@ -276,3 +282,69 @@ async def test_notifications_after_disconnect_are_dropped(
     await transport.disconnect()
     fake_client.notify(b"\x01")
     assert received == []
+
+
+class ProxyGattStatus:
+    """Shape of the ``error`` field on an aioesphomeapi GATT error."""
+
+    def __init__(self, error: int) -> None:
+        self.error = error
+
+
+class ProxyGattError(Exception):
+    """Stand in for aioesphomeapi ``BluetoothGATTAPIError``."""
+
+    def __init__(self, error: int) -> None:
+        super().__init__(f"Bluetooth GATT Error error={error}")
+        self.error = ProxyGattStatus(error)
+
+
+def proxy_bleak_error(error: int) -> BleakError:
+    cause = ProxyGattError(error)
+    wrapped = BleakError(str(cause))
+    wrapped.__cause__ = cause
+    return wrapped
+
+
+async def run_operation(transport: BleakTransport, operation: str) -> None:
+    if operation == "read":
+        await transport.read_gatt_char("c")
+    else:
+        await transport.write_gatt_char("c", b"\x01", response=True)
+
+
+@pytest.mark.parametrize("operation", ["read", "write"])
+async def test_proxy_refusal_becomes_a_gatt_protocol_error(
+    device: BLEDevice, fake_client: FakeBleakClient, operation: str
+) -> None:
+    transport = BleakTransport(device)
+    await transport.connect(lambda: None)
+    fake_client.fail_with = proxy_bleak_error(3)
+
+    with pytest.raises(BleakGATTProtocolError) as info:
+        await run_operation(transport, operation)
+
+    assert info.value.code is BleakGATTProtocolErrorCode.WRITE_NOT_PERMITTED
+    assert info.value.__cause__ is fake_client.fail_with
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        proxy_bleak_error(-1),
+        BleakError("plain"),
+        BleakGATTProtocolError(BleakGATTProtocolErrorCode.READ_NOT_PERMITTED),
+    ],
+)
+@pytest.mark.parametrize("operation", ["read", "write"])
+async def test_other_bleak_errors_pass_through(
+    device: BLEDevice, fake_client: FakeBleakClient, operation: str, error: BleakError
+) -> None:
+    transport = BleakTransport(device)
+    await transport.connect(lambda: None)
+    fake_client.fail_with = error
+
+    with pytest.raises(BleakError) as info:
+        await run_operation(transport, operation)
+
+    assert info.value is error

@@ -8,6 +8,7 @@ from contextlib import suppress
 from bleak import BleakClient
 from bleak.backends.characteristic import BleakGATTCharacteristic
 from bleak.backends.device import BLEDevice
+from bleak.exc import BleakError, BleakGATTProtocolError
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
 from .const import DEFAULT_CONNECT_TIMEOUT_SECONDS
@@ -17,6 +18,22 @@ from .transport_types import BleTransport, DisconnectedCallback, NotificationCal
 __all__ = ["BleakTransport"]
 
 _LOGGER = logging.getLogger(__name__)
+
+_ATT_ERROR_CODES = range(1, 256)
+
+
+def _proxy_att_error(err: BleakError) -> int | None:
+    """Return the ATT error code an ESPHome proxy wrapped in ``err``.
+
+    bleak-esphome raises a plain ``BleakError`` caused by an aioesphomeapi
+    ``BluetoothGATTAPIError``. Its ``error.error`` holds the ATT error code
+    of the device, or -1 when the link dropped. The code is read by
+    attribute so this module does not import aioesphomeapi.
+    """
+    code = getattr(getattr(err.__cause__, "error", None), "error", None)
+    if isinstance(code, int) and code in _ATT_ERROR_CODES:
+        return code
+    return None
 
 
 class BleakTransport(BleTransport):
@@ -136,8 +153,18 @@ class BleakTransport(BleTransport):
 
         Raises:
             DotConnectionError: The transport is not connected.
+            BleakGATTProtocolError: The device refused the read, also when
+                an ESPHome proxy reports the refusal.
         """
-        return bytes(await self.client.read_gatt_char(characteristic))
+        try:
+            return bytes(await self.client.read_gatt_char(characteristic))
+        except BleakGATTProtocolError:
+            raise
+        except BleakError as err:
+            code = _proxy_att_error(err)
+            if code is None:
+                raise
+            raise BleakGATTProtocolError(code) from err
 
     async def write_gatt_char(
         self, characteristic: str, data: bytes, response: bool = False
@@ -146,8 +173,18 @@ class BleakTransport(BleTransport):
 
         Raises:
             DotConnectionError: The transport is not connected.
+            BleakGATTProtocolError: The device refused the write, also when
+                an ESPHome proxy reports the refusal.
         """
-        await self.client.write_gatt_char(characteristic, data, response=response)
+        try:
+            await self.client.write_gatt_char(characteristic, data, response=response)
+        except BleakGATTProtocolError:
+            raise
+        except BleakError as err:
+            code = _proxy_att_error(err)
+            if code is None:
+                raise
+            raise BleakGATTProtocolError(code) from err
 
     def _on_disconnect(self, _client: BleakClient) -> None:
         callback = self._disconnected_callback
