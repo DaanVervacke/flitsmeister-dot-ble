@@ -13,6 +13,7 @@ Before 1.0, breaking changes ship as minor bumps.
 - Correct the alert cut off byte and documentation drift
 - Keep the session when the DOT refuses a read back
 - Read both settings and keep live validation going after a refused read
+- Mark the serial UUID hash as not used for security
 
 ### Documentation
 
