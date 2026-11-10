@@ -513,3 +513,14 @@ def test_every_prompted_preset_describes_what_the_dot_does(
 )
 def test_parse_answer(answer: str, outcome: Outcome | None) -> None:
     assert live_validate.parse_answer(answer) is outcome
+
+
+async def test_refused_settings_read_at_start_is_recorded_and_the_run_goes_on() -> None:
+    inner = EchoTransport()
+    inner.refuse_reads.add(BRIGHTNESS_CHARACTERISTIC_UUID)
+    results = await live_validate.validate(
+        _config(sections=("sounds",)), _transport(inner), FakeConsole(inner)
+    )
+    outcomes = {result.name: result.outcome for result in results}
+    assert outcomes["read_settings at start"] is Outcome.FAIL
+    assert any(result.section == "sounds" for result in results)

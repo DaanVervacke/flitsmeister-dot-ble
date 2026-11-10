@@ -313,11 +313,14 @@ async def run_with_dot[TransportT: BleTransport, ResultT](
     """Find the DOT, connect and return the result of ``body``.
 
     ``wrap`` turns the Bleak transport into the transport ``body`` gets.
-    The DOT stops advertising between motion events, so a failed connect
-    starts a new scan, up to ``CONNECT_ATTEMPTS`` times.
+    The DOT stops advertising between motion events, so a
+    ``DotConnectionError`` raised anywhere in ``body``, including a failed
+    connect, starts a new scan and runs ``body`` again, up to
+    ``CONNECT_ATTEMPTS`` times. Other errors from ``body`` pass through.
 
     Raises:
-        DotConnectionError: Every connect attempt failed.
+        DotConnectionError: Every attempt failed.
+        DotTimeoutError: A connect timed out. It is not retried.
         TimeoutError: No matching device was seen before the deadline.
     """
     async with open_scanner(proxy, noise_psk) as scan:

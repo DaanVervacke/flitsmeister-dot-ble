@@ -618,24 +618,40 @@ async def test_refused_read_back_raises_and_keeps_the_session(
         assert isinstance(info.value.__cause__, BleakGATTProtocolError)
         assert client.ready
         assert client.state.brightness is None
+        assert client.state.led_orientation is LedOrientation.NORMAL
 
     assert lost == []
 
 
 class RefusingReadTransport(FakeTransport):
-    """Transport that refuses the speech language read with ``DotRejectedError``."""
+    """Transport that refuses one read with ``DotRejectedError``."""
+
+    def __init__(self, refused: str) -> None:
+        super().__init__()
+        self.refused = refused
 
     async def read_gatt_char(self, characteristic: str) -> bytes:
-        if characteristic == SPEECH_LANGUAGE_CHARACTERISTIC_UUID:
+        if characteristic == self.refused:
             raise DotRejectedError(f"refused {characteristic}")
         return await super().read_gatt_char(characteristic)
 
 
 async def test_connect_skips_a_read_refused_with_dot_rejected_error() -> None:
-    async with make_client(RefusingReadTransport()) as client:
+    transport = RefusingReadTransport(SPEECH_LANGUAGE_CHARACTERISTIC_UUID)
+    async with make_client(transport) as client:
         assert client.ready
         assert client.state.speech_language is None
         assert client.state.manufacturer_name == "Flitsmeister"
+
+
+async def test_read_back_refused_with_dot_rejected_error_keeps_the_session() -> None:
+    transport = RefusingReadTransport(BRIGHTNESS_CHARACTERISTIC_UUID)
+    async with make_client(transport) as client:
+        with pytest.raises(DotRejectedError, match="refused"):
+            await client.read_settings()
+
+        assert client.ready
+        assert client.state.led_orientation is LedOrientation.NORMAL
 
 
 async def test_malformed_settings_read_raises(transport: FakeTransport) -> None:

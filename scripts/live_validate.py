@@ -33,6 +33,7 @@ from flitsmeister_dot_ble import (
     DotEnd,
     DotError,
     DotNotReadyError,
+    DotRejectedError,
     DotSound,
     DotState,
     DotUpdate,
@@ -1129,7 +1130,10 @@ async def validate(
     async with client:
         v.section = "connect"
         v.expect("connect() through async with", client.ready)
-        await client.read_settings()
+        try:
+            await client.read_settings()
+        except DotRejectedError as err:
+            v.record("read_settings at start", Outcome.FAIL, str(err))
         brightness = client.state.brightness
         orientation = client.state.led_orientation
         try:

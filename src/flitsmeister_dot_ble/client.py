@@ -314,7 +314,8 @@ class FlitsmeisterDotClient:
                 while connecting, or ``disconnect()`` cancelled the
                 attempt. Transport errors are chained as ``__cause__``.
             DotTimeoutError: A subscribe or a read did not finish within
-                ``response_timeout_seconds``. A slow update callback also
+                ``response_timeout_seconds``, also when the link dropped
+                without the transport raising. A slow update callback also
                 trips this timeout.
             DotProtocolError: A read returned a malformed payload.
         """
@@ -446,14 +447,23 @@ class FlitsmeisterDotClient:
 
         Raises:
             DotNotReadyError: The session is not ready.
-            DotRejectedError: The DOT refused a read. The session stays
-                ready.
+            DotRejectedError: The DOT refused a read. The other value is
+                still read and the session stays ready.
             DotConnectionError: The session failed earlier or a read
                 failed.
             DotProtocolError: A read returned a malformed value.
         """
-        await self._read_and_apply(BRIGHTNESS_CHARACTERISTIC_UUID)
-        await self._read_and_apply(LED_ROTATION_CHARACTERISTIC_UUID)
+        refusals: list[DotRejectedError] = []
+        for characteristic in (
+            BRIGHTNESS_CHARACTERISTIC_UUID,
+            LED_ROTATION_CHARACTERISTIC_UUID,
+        ):
+            try:
+                await self._read_and_apply(characteristic)
+            except DotRejectedError as err:
+                refusals.append(err)
+        if refusals:
+            raise refusals[0]
 
     @property
     def _closing(self) -> bool:
