@@ -44,9 +44,11 @@ class BleTransport(Protocol):
     async def read_gatt_char(self, characteristic: str) -> bytes:
         """Read ``characteristic`` and return its value.
 
-        Raise ``bleak.exc.BleakGATTProtocolError`` when the device refuses
-        the read. The client then leaves that value unset. Any other error
-        fails the session.
+        Raise ``bleak.exc.BleakGATTProtocolError`` or ``DotRejectedError``
+        when the device refuses the read. During ``connect()`` the client
+        leaves that value unset. After ``connect()`` the client raises
+        ``DotRejectedError`` and keeps the session. An ``OSError``,
+        ``BleakError`` or ``TimeoutError`` fails the session.
         """
 
     async def write_gatt_char(
@@ -56,6 +58,6 @@ class BleTransport(Protocol):
 
         Raise ``bleak.exc.BleakGATTProtocolError`` or ``DotRejectedError``
         when the device refuses the write. The client raises
-        ``DotRejectedError`` and keeps the session. Any other error fails
-        the session.
+        ``DotRejectedError`` and keeps the session. An ``OSError``,
+        ``BleakError`` or ``TimeoutError`` fails the session.
         """

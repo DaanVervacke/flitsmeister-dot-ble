@@ -88,9 +88,9 @@ Every error derives from `DotError`.
 | Error | Raised when |
 | --- | --- |
 | `DotNotReadyError` | a method runs before the session is ready |
-| `DotConnectionError` | the transport fails or the link drops |
-| `DotTimeoutError` | the DOT does not answer in time |
-| `DotRejectedError` | the DOT refuses a write, the session stays ready |
+| `DotConnectionError` | the transport fails, the link drops or a call times out after connecting |
+| `DotTimeoutError` | the DOT does not answer during `connect()` |
+| `DotRejectedError` | the DOT refuses a write or a read and the session stays ready |
 | `DotProtocolError` | the DOT sends a malformed value |
 | `DotValidationError` | an argument is out of range |
 

@@ -31,7 +31,11 @@ class DotConnectionError(DotError):
 
 
 class DotTimeoutError(DotError, TimeoutError):
-    """The DOT did not answer before the timeout."""
+    """The DOT did not answer while connecting.
+
+    After ``connect()`` a timeout fails the session and raises
+    ``DotConnectionError``.
+    """
 
 
 class DotProtocolError(DotError):
@@ -39,10 +43,10 @@ class DotProtocolError(DotError):
 
 
 class DotRejectedError(DotError):
-    """The DOT refused a write with a GATT error.
+    """The DOT refused a write or a read.
 
-    The link stays up and the session stays ``READY``. The GATT error is
-    chained as ``__cause__``.
+    The link stays up and the session stays ``READY``. When the transport
+    raised a GATT error, that error is chained as ``__cause__``.
     """
 
 

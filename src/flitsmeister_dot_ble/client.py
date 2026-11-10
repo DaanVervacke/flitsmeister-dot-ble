@@ -301,11 +301,10 @@ class FlitsmeisterDotClient:
         Connects the transport, subscribes to the button, battery,
         charging and motion characteristics, reads the device information
         and the speech language and returns once every read finished. A
-        read the DOT refuses with a GATT error leaves its value None.
-        Does nothing when already
-        connected. Waits for the cleanup of a failed session first. The
-        client can connect again after ``disconnect()`` or after a lost
-        session.
+        read the DOT refuses leaves its value None. Does nothing when
+        already connected. Waits for the cleanup of a failed session
+        first. The client can connect again after ``disconnect()`` or
+        after a lost session.
 
         A failed attempt cleans up the transport and does not call
         ``connection_lost_callback``.
@@ -411,8 +410,8 @@ class FlitsmeisterDotClient:
 
         Raises:
             DotNotReadyError: The session is not ready.
-            DotRejectedError: The DOT refused the write. The session stays
-                ready.
+            DotRejectedError: The DOT refused the write or the read back.
+                The session stays ready.
             DotConnectionError: The session failed earlier or the write
                 or the read back failed.
             DotProtocolError: The read back returned a malformed value.
@@ -427,8 +426,8 @@ class FlitsmeisterDotClient:
 
         Raises:
             DotNotReadyError: The session is not ready.
-            DotRejectedError: The DOT refused the write. The session stays
-                ready.
+            DotRejectedError: The DOT refused the write or the read back.
+                The session stays ready.
             DotConnectionError: The session failed earlier or the write
                 or the read back failed.
             DotProtocolError: The read back returned a malformed value.
@@ -447,6 +446,8 @@ class FlitsmeisterDotClient:
 
         Raises:
             DotNotReadyError: The session is not ready.
+            DotRejectedError: The DOT refused a read. The session stays
+                ready.
             DotConnectionError: The session failed earlier or a read
                 failed.
             DotProtocolError: A read returned a malformed value.
@@ -485,7 +486,7 @@ class FlitsmeisterDotClient:
                 async with asyncio.timeout(self._response_timeout):
                     try:
                         payload = await self.transport.read_gatt_char(characteristic)
-                    except BleakGATTProtocolError:
+                    except BleakGATTProtocolError, DotRejectedError:
                         _LOGGER.debug("The DOT refused the read of %s", characteristic)
                         continue
                     await self._apply(characteristic, payload)
@@ -652,6 +653,10 @@ class FlitsmeisterDotClient:
         try:
             async with asyncio.timeout(self._response_timeout):
                 payload = await self.transport.read_gatt_char(characteristic)
+        except BleakGATTProtocolError as err:
+            raise DotRejectedError(
+                f"The DOT refused the read of {characteristic}"
+            ) from err
         except _TRANSPORT_ERRORS as err:
             failure = DotConnectionError("Reading the DOT failed")
             self._fail(failure)
