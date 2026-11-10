@@ -11,10 +11,12 @@ Before 1.0, breaking changes ship as minor bumps.
 ### Bug Fixes
 
 - Correct the alert cut off byte and documentation drift
+- Keep the session when the DOT refuses a read back
 
 ### Documentation
 
 - Document the live validation findings and shorten the public docs
+- Document __version__ and the probe output flag
 
 ### Features
 
@@ -30,5 +32,8 @@ Before 1.0, breaking changes ship as minor bumps.
 ### Maintenance
 
 - Require bleak 3.0.0 or newer
+- Share the proxy refusal mapping and test it against aioesphomeapi
+- Share the script connect loop and restore the Bluetooth manager
+- Split the live validation checks and name their constants
 
 
