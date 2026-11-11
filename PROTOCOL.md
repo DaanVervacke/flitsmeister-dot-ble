@@ -228,12 +228,15 @@ The voice is part of the firmware image. To change the language or the voice (ma
 | Characteristic | Format |
 |---|---|
 | Battery level `0x2A19` | 1 byte, 0 to 100 percent |
-| Charging state `0x2BED` | 3 or more bytes, the app reads byte 2: 0 consuming, 1 charging, 2 charging done |
+| Charging state `0x2BED` | 3 or more bytes, the app reads byte 2: 0 consuming, 1 charging, 2 plugged in. The app calls 2 "charging done" |
 | Motion `...1580` | 1 byte: 0 parked, any other value driving. Driven by the accelerometer. The device sleeps while parked and wakes on motion |
 | Serial number `0x2A25` | raw bytes, redacted in captures. The app hashes them with `UUID.nameUUIDFromBytes` (MD5) and uppercases the result |
 
-Bytes 0 and 1 of the charging state are unknown. A device on USB power
-at 69 percent sends `00 a3 02` for charging done.
+Bytes 0 and 1 of the charging state are unknown. Value 2 does not mean a
+full battery. It means USB power is connected while the charger is outside
+its main charging phase. A device on USB power at 69 percent sends
+`00 a3 02`, and a live DOT on firmware 2.9.0 reported 2 while its battery
+level still rose from 97 to 99 percent.
 
 ## Connection sequence
 

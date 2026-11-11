@@ -65,7 +65,13 @@ class ButtonAction(IntEnum):
 
 
 class ChargingState(IntEnum):
-    """Charging state from the battery charging characteristic."""
+    """Charging state from the battery charging characteristic.
+
+    ``CHARGING_DONE`` keeps the name the Flitsmeister app uses, but it does
+    not mean a full battery. The DOT reports it whenever USB power is
+    connected and the charger is outside its main charging phase, from
+    69 percent up, and the battery level can still rise under it.
+    """
 
     CONSUMING = 0
     CHARGING = 1
