@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Before 1.0, breaking changes ship as minor bumps.
 
-## [Unreleased]
+## [0.1.0] - 2026-11-11
 
 ### Bug Fixes
 
@@ -19,6 +19,7 @@ Before 1.0, breaking changes ship as minor bumps.
 
 - Document the live validation findings and shorten the public docs
 - Document __version__ and the probe output flag
+- Describe charging state 2 as plugged in
 
 ### Features
 
@@ -39,4 +40,5 @@ Before 1.0, breaking changes ship as minor bumps.
 - Split the live validation checks and name their constants
 - Test the script retry limit and the proxy shutdown
 
+[0.1.0]: https://github.com/DaanVervacke/flitsmeister-dot-ble/releases/tag/v0.1.0
 
